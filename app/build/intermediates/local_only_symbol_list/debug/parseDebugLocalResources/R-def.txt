@@ -1,0 +1,26 @@
+R_DEF: Internal format may change without notice
+local
+drawable ic_launcher
+drawable ic_launcher_round
+drawable ic_logo
+string app_name
+string app_tagline
+string back_to_home
+string cd_alerts
+string cd_carousel
+string cd_config
+string cd_contacts
+string cd_logo
+string cd_navigate
+string cd_route
+string cd_scan
+string feat_alerts
+string feat_config
+string feat_contacts
+string feat_navigate
+string feat_route
+string feat_scan
+string feature_coming_soon
+string swipe_hint
+string welcome_message
+style Theme.PasoSeguro

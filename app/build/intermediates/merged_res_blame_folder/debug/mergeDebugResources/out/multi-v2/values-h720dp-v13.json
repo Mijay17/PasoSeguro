@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.pasoseguro.app-mergeDebugResources-60:/values-h720dp-v13/values-h720dp-v13.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\User\\.gradle\\caches\\9.0.0\\transforms\\5ef80e394f47e8b35666dbc41e080c05\\transformed\\appcompat-1.1.0\\res\\values-h720dp-v13\\values-h720dp-v13.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "66",
+                        "endOffsets": "117"
+                    }
+                }
+            ]
+        }
+    ]
+}

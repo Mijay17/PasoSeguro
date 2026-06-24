@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PasoSeguro</string>
+    <string name="app_tagline">Navegación asistida con IA</string>
+    <string name="welcome_message">Bienvenido a PasoSeguro</string>
+    <string name="swipe_hint">Desliza para explorar las funciones</string>
+    <string name="feature_coming_soon">Esta función será implementada en la siguiente fase del proyecto.</string>
+    <string name="back_to_home">Volver al inicio</string>
+
+    <!-- Feature names -->
+    <string name="feat_navigate">Navegar</string>
+    <string name="feat_scan">Escanear</string>
+    <string name="feat_route">Ruta</string>
+    <string name="feat_contacts">Contactos</string>
+    <string name="feat_alerts">Notificaciones</string>
+    <string name="feat_config">Configuración</string>
+
+    <!-- Accessibility descriptions -->
+    <string name="cd_navigate">Botón de navegación asistida</string>
+    <string name="cd_scan">Botón de escaneo del entorno</string>
+    <string name="cd_route">Botón de gestión de rutas</string>
+    <string name="cd_contacts">Botón de contactos de confianza</string>
+    <string name="cd_alerts">Botón de notificaciones y alertas</string>
+    <string name="cd_config">Botón de configuración</string>
+    <string name="cd_logo">Logo de PasoSeguro</string>
+    <string name="cd_carousel">Carrusel de funciones, desliza para explorar</string>
+</resources>
