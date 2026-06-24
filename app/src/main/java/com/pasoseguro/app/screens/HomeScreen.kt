@@ -41,7 +41,13 @@ fun HomeScreen(navController: NavController) {
     val topFeatures = listOf(Feature.CONTACTS, Feature.ALERTS, Feature.CONFIG)
     val botFeatures = listOf(Feature.NAVIGATE, Feature.SCAN, Feature.ROUTE)
 
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { features.size + 1 })
+    // Virtual infinite pager: 1 000 full loops (7 000 pages).
+    // Starting at loop 500 (page 3 500) keeps Float scroll offsets well within
+    // safe range and lets the user swipe 3 500 slides in either direction before
+    // ever hitting a wall — effectively circular.
+    val actualPageCount = features.size + 1          // 7
+    val startPage       = actualPageCount * 500      // 3 500  (middle of 7 000)
+    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { actualPageCount * 1_000 })
 
     // Build a LongPressConfig for a given feature (null = use double-tap mode)
     fun longPressConfigFor(feature: Feature): LongPressConfig? {
@@ -80,10 +86,12 @@ fun HomeScreen(navController: NavController) {
             contentAlignment = Alignment.Center,
         ) {
             FeatureCarousel(
-                pagerState          = pagerState,
-                onFeatureTap        = tapHandler::onTap,
-                longPressConfigFor  = ::longPressConfigFor,
-                modifier            = Modifier.fillMaxSize(),
+                pagerState         = pagerState,
+                onFeatureTap       = tapHandler::onTap,
+                longPressConfigFor = ::longPressConfigFor,
+                onSpeak            = tts::speak,
+                onHaptic           = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+                modifier           = Modifier.fillMaxSize(),
             )
         }
 

@@ -10,6 +10,8 @@ import com.pasoseguro.app.data.PreferencesRepository
 import com.pasoseguro.app.screens.HomeScreen
 import com.pasoseguro.app.screens.FeatureScreen
 import com.pasoseguro.app.screens.NavigateScreen
+import com.pasoseguro.app.screens.ExploreScreen
+import com.pasoseguro.app.screens.AlertsScreen
 import com.pasoseguro.app.screens.ContactsScreen
 import com.pasoseguro.app.screens.ConfigScreen
 
@@ -41,6 +43,8 @@ fun NavGraph(
             composable(feature.route) {
                 when (feature) {
                     Feature.NAVIGATE -> NavigateScreen(navController = navController)
+                    Feature.SCAN    -> ExploreScreen(navController = navController)
+                    Feature.ALERTS   -> AlertsScreen(navController = navController)
                     Feature.CONTACTS -> ContactsScreen(navController = navController)
                     Feature.CONFIG   -> ConfigScreen(
                         navController = navController,

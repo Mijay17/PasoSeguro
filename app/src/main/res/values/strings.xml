@@ -9,7 +9,7 @@
 
     <!-- Feature names -->
     <string name="feat_navigate">Navegar</string>
-    <string name="feat_scan">Escanear</string>
+    <string name="feat_scan">Explorar</string>
     <string name="feat_route">Ruta</string>
     <string name="feat_contacts">Contactos</string>
     <string name="feat_alerts">Notificaciones</string>
@@ -17,7 +17,7 @@
 
     <!-- Accessibility descriptions -->
     <string name="cd_navigate">Botón de navegación asistida</string>
-    <string name="cd_scan">Botón de escaneo del entorno</string>
+    <string name="cd_scan">Botón de exploración del entorno</string>
     <string name="cd_route">Botón de gestión de rutas</string>
     <string name="cd_contacts">Botón de contactos de confianza</string>
     <string name="cd_alerts">Botón de notificaciones y alertas</string>
