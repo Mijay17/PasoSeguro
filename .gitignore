@@ -45,9 +45,5 @@ local.properties
 Thumbs.db
 ehthumbs.db
 
-# ── Imágenes / documentos de referencia dentro del árbol de fuentes ───────────
-# Las imágenes nunca deben estar dentro de app/src/main/java/.
-# Los recursos visuales van en app/src/main/res/drawable/.
-app/src/main/java/**/*.png
-app/src/main/java/**/*.jpg
-app/src/main/java/**/*.jpeg
+# ── Carpeta docs/ (imágenes y referencias de diseño) ──────────────────────────
+docs/
