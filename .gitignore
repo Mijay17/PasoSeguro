@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# .gitignore para proyecto Android — Jetpack Compose / Kotlin
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Gradle cache del proyecto (binarios de lock, checksums, etc.) ─────────────
+.gradle/
+
+# ── Carpetas de build generadas automáticamente ───────────────────────────────
+# Nunca deben versionarse: se recrean con cada compilación.
+/build/
+app/build/
+
+# ── Configuración local de la máquina ─────────────────────────────────────────
+# Contiene sdk.dir con la ruta ABSOLUTA del Android SDK en este equipo.
+# Si se sube, rompe el clone de cualquier otro desarrollador.
+local.properties
+
+# ── Sesiones del daemon de Kotlin ─────────────────────────────────────────────
+.kotlin/
+
+# ── Android Studio — archivos personales o de caché de la IDE ─────────────────
+# Estos archivos son específicos de cada desarrollador / instalación.
+# Los archivos de configuración compartible (.name, gradle.xml, misc.xml,
+# vcs.xml, compiler.xml, runConfigurations.xml, inspectionProfiles/)
+# SÍ se mantienen versionados porque ayudan a onboardear nuevos colaboradores.
+.idea/workspace.xml
+.idea/caches/
+.idea/deploymentTargetSelector.xml
+.idea/migrations.xml
+.idea/markdown.xml
+
+# ── Artefactos compilados ─────────────────────────────────────────────────────
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ── Keystores de firma (CRÍTICO: nunca versionar claves de firma) ─────────────
+*.jks
+*.keystore
+
+# ── Archivos generados por sistemas operativos ────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+
+# ── Imágenes / documentos de referencia dentro del árbol de fuentes ───────────
+# Las imágenes nunca deben estar dentro de app/src/main/java/.
+# Los recursos visuales van en app/src/main/res/drawable/.
+app/src/main/java/**/*.png
+app/src/main/java/**/*.jpg
+app/src/main/java/**/*.jpeg
