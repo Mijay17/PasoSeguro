@@ -33,13 +33,13 @@ enum class Feature(
     ),
     SCAN(
         route              = "scan",
-        label              = "Escanear",
-        description        = "Analiza el entorno a tu alrededor usando la cámara del dispositivo.",
-        icon               = Icons.Filled.DocumentScanner,
+        label              = "Explorar",
+        description        = "Obtén una descripción del espacio a tu alrededor antes de desplazarte.",
+        icon               = Icons.Filled.Explore,
         tint               = ScanTeal,
         container          = ScanTealLight,
-        contentDescription = "Botón de escaneo del entorno",
-        ttsText            = "Escanear",
+        contentDescription = "Botón de exploración del entorno",
+        ttsText            = "Explorar",
     ),
     ROUTE(
         route              = "route",
