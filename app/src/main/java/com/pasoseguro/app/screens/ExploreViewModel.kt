@@ -10,11 +10,16 @@ import com.pasoseguro.app.data.TtsSpeed
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.random.Random
@@ -35,8 +40,7 @@ internal data class ExploreZoneDetail(
 // TODO: Replace with real ImageAnalysis + object-detection model output
 
 private const val WELCOME_TEXT =
-    "Has ingresado al modo Exploración. " +
-    "Gira lentamente sobre tu posición mientras analizo el entorno."
+    "Bienvenido al modo Explorar. Gira lentamente para analizar el espacio que te rodea."
 
 // Full environment description spoken and displayed after analysis completes
 internal const val ENVIRONMENT_DISPLAY =
@@ -111,6 +115,11 @@ private class ExploreTtsHelper(context: Context) {
 
     private val doneChannel = Channel<Unit>(Channel.CONFLATED)
 
+    // Serializa speakAndAwait: la exploración automática y las respuestas del
+    // Asistente IA por voz ahora pueden llamarlo al mismo tiempo — sin este
+    // mutex, una cortaría a la otra (ambas usan QUEUE_FLUSH).
+    private val speechMutex = Mutex()
+
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -127,12 +136,13 @@ private class ExploreTtsHelper(context: Context) {
         }
     }
 
-    suspend fun speakAndAwait(text: String, fallbackMs: Long = 4000L) {
-        if (!enabled || !ready) { delay(fallbackMs); return }
+    suspend fun speakAndAwait(text: String, fallbackMs: Long = 4000L) = speechMutex.withLock {
+        if (!enabled || !ready) { delay(fallbackMs); return@withLock }
         doneChannel.tryReceive()
         tts?.setSpeechRate(speechRate)
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
         withTimeoutOrNull(30_000L) { doneChannel.receive() }
+        Unit
     }
 
     fun speak(text: String) {
@@ -160,6 +170,12 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
     private val _uiState = MutableStateFlow(ExploreUiState())
     val uiState: StateFlow<ExploreUiState> = _uiState.asStateFlow()
 
+    // Emite cada vez que el Asistente IA termina de hablar una indicación —
+    // ExploreScreen lo usa para abrir una breve ventana de escucha por voz
+    // (sin botón) sin acoplar el reconocimiento a esta ViewModel.
+    private val _speechFinished = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val speechFinished: SharedFlow<Unit> = _speechFinished.asSharedFlow()
+
     private var activeJob: Job? = null
 
     init {
@@ -184,16 +200,19 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
         activeJob = viewModelScope.launch {
             delay(300L)
             ttsHelper.speakAndAwait(WELCOME_TEXT)
+            _speechFinished.tryEmit(Unit)
 
             _uiState.update { it.copy(phase = ExplorePhase.ANALYZING) }
             delay(Random.nextLong(5_000L, 8_001L))  // TODO: replace with real analysis time
 
             _uiState.update { it.copy(phase = ExplorePhase.COMPLETE) }
             ttsHelper.speakAndAwait(ENVIRONMENT_SPEAK)
+            _speechFinished.tryEmit(Unit)
 
             delay(600L)
             _uiState.update { it.copy(phase = ExplorePhase.READY) }
             ttsHelper.speakAndAwait(FOLLOWUP_QUESTION)
+            _speechFinished.tryEmit(Unit)
         }
     }
 
@@ -215,9 +234,18 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
         _uiState.update { it.copy(activeZone = zone, zoneDetail = detail) }
         activeJob = viewModelScope.launch {
             ttsHelper.speakAndAwait(detail.speakText)
+            _speechFinished.tryEmit(Unit)
             delay(1_000L)
             _uiState.update { it.copy(activeZone = null, zoneDetail = null) }
             ttsHelper.speak(FOLLOWUP_QUESTION)
+        }
+    }
+
+    /** Para el Asistente IA por voz: habla [text] y solo al terminar ejecuta [onDone]. */
+    fun speakThenRun(text: String, onDone: () -> Unit) {
+        viewModelScope.launch {
+            ttsHelper.speakAndAwait(text)
+            onDone()
         }
     }
 

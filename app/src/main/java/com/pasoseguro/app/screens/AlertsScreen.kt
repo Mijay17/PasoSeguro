@@ -28,6 +28,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.pasoseguro.app.components.AssistantMicButton
+import com.pasoseguro.app.components.BarAction
+import com.pasoseguro.app.components.ProceduralBottomBar
 import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.ui.theme.*
 import com.pasoseguro.app.utils.ConfirmActionState
@@ -35,6 +38,7 @@ import com.pasoseguro.app.utils.ConfirmProgressBar
 import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.TtsHelper
 import com.pasoseguro.app.utils.rememberConfirmAction
+import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -54,6 +58,9 @@ fun AlertsScreen(navController: NavController) {
         tts.enabled = prefs.ttsEnabled
         tts.setSpeed(prefs.ttsSpeed)
     }
+    LaunchedEffect(Unit) {
+        tts.speak("Bienvenido al Historial de actividad. Aquí encontrarás las alertas registradas durante el uso de PasoSeguro.")
+    }
 
     val backConfirm = rememberConfirmAction(
         pendingMessage = "Has seleccionado regresar. Presiona nuevamente para confirmar.",
@@ -62,11 +69,64 @@ fun AlertsScreen(navController: NavController) {
         onConfirm      = { navController.popBackStack() },
     )
 
+    val assistantConfirm = rememberVoiceAssistantTrigger(
+        navController = navController,
+        onSpeak       = tts::speak,
+        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+        speakThenRun  = tts::speak,
+    )
+
     Scaffold(
         topBar = {
             AlertsTopBar(
-                eventCount  = uiState.filteredEvents.size,
-                backConfirm = backConfirm,
+                eventCount       = uiState.filteredEvents.size,
+                backConfirm      = backConfirm,
+                assistantConfirm = assistantConfirm,
+            )
+        },
+        bottomBar = {
+            val currentMode = uiState.selectedFilter
+            val toggleTarget = if (currentMode == EventMode.EXPLORE) EventMode.NAVIGATE else EventMode.EXPLORE
+            val toggleLabel  = if (toggleTarget == EventMode.NAVIGATE) "Navegar" else "Explorar"
+            val toggleIcon   = if (toggleTarget == EventMode.NAVIGATE) Icons.Filled.NearMe else Icons.Filled.Explore
+
+            ProceduralBottomBar(
+                left = BarAction(
+                    icon           = Icons.Filled.List,
+                    label          = "Todos",
+                    selected       = uiState.selectedFilter == null,
+                    pendingMessage = "Has seleccionado Todos. Presiona nuevamente para confirmar.",
+                    onConfirm      = {
+                        vm.setFilter(null)
+                        tts.speak("Mostrando todos los registros.")
+                    },
+                ),
+                center = BarAction(
+                    icon           = toggleIcon,
+                    label          = toggleLabel,
+                    pendingMessage = "Has seleccionado $toggleLabel. Presiona nuevamente para confirmar.",
+                    onConfirm      = {
+                        vm.setFilter(toggleTarget)
+                        tts.speak("Modo $toggleLabel seleccionado.")
+                    },
+                ),
+                right = BarAction(
+                    icon           = Icons.Filled.Schedule,
+                    label          = "Recientes",
+                    selected       = uiState.recentOnly,
+                    pendingMessage = "Has seleccionado Recientes. Presiona nuevamente para confirmar.",
+                    onConfirm      = {
+                        val activating = !uiState.recentOnly
+                        vm.toggleRecentOnly()
+                        tts.speak(
+                            if (activating) "Mostrando eventos recientes." else "Mostrando todos los eventos."
+                        )
+                    },
+                ),
+                accentColor   = AlertRed,
+                tts           = tts,
+                hapticEnabled = prefs.hapticEnabled,
+                modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
         },
     ) { innerPadding ->
@@ -82,11 +142,6 @@ fun AlertsScreen(navController: NavController) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 10.dp),
-            )
-            FilterChipsRow(
-                selectedFilter   = uiState.selectedFilter,
-                onFilterSelected = vm::setFilter,
-                modifier         = Modifier.padding(horizontal = 16.dp),
             )
             HorizontalDivider(
                 modifier  = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -118,7 +173,11 @@ fun AlertsScreen(navController: NavController) {
 // ── Top bar ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun AlertsTopBar(eventCount: Int, backConfirm: ConfirmActionState) {
+private fun AlertsTopBar(
+    eventCount: Int,
+    backConfirm: ConfirmActionState,
+    assistantConfirm: ConfirmActionState,
+) {
     // Wrap in Column so the countdown strip appears flush below the app bar,
     // inside the topBar slot — Scaffold accounts for the full height automatically.
     Column {
@@ -139,18 +198,23 @@ private fun AlertsTopBar(eventCount: Int, backConfirm: ConfirmActionState) {
                     }
                 }
             },
-            navigationIcon = {
+            actions = {
+                AssistantMicButton(
+                    pending = assistantConfirm.isPending,
+                    onClick = assistantConfirm::onTap,
+                    tint    = MaterialTheme.colorScheme.onSurface,
+                )
                 IconButton(
                     onClick  = backConfirm::onTap,
                     modifier = Modifier.semantics {
                         contentDescription = if (backConfirm.isPending)
                             "Confirmación pendiente. Presiona de nuevo para regresar."
                         else
-                            "Volver al inicio"
+                            "Cerrar y volver al inicio"
                     },
                 ) {
                     Icon(
-                        imageVector        = Icons.Filled.ArrowBack,
+                        imageVector        = Icons.Filled.Close,
                         contentDescription = null,
                         tint               = if (backConfirm.isPending) AlertRed
                                              else MaterialTheme.colorScheme.onSurface,
@@ -207,58 +271,6 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, modifier: Modi
         modifier       = modifier.semantics {
             contentDescription = "Campo de búsqueda. Escribe para filtrar eventos."
         },
-    )
-}
-
-// ── Filter chips ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun FilterChipsRow(
-    selectedFilter: EventMode?,
-    onFilterSelected: (EventMode?) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ModeFilterChip(
-            label    = "Todos",
-            selected = selectedFilter == null,
-            color    = AlertRed,
-            onClick  = { onFilterSelected(null) },
-        )
-        ModeFilterChip(
-            label    = "Navegar",
-            selected = selectedFilter == EventMode.NAVIGATE,
-            color    = NavBlue,
-            onClick  = { onFilterSelected(EventMode.NAVIGATE) },
-        )
-        ModeFilterChip(
-            label    = "Explorar",
-            selected = selectedFilter == EventMode.EXPLORE,
-            color    = ScanTeal,
-            onClick  = { onFilterSelected(EventMode.EXPLORE) },
-        )
-    }
-}
-
-@Composable
-private fun ModeFilterChip(
-    label: String,
-    selected: Boolean,
-    color: Color,
-    onClick: () -> Unit,
-) {
-    FilterChip(
-        selected    = selected,
-        onClick     = onClick,
-        label       = { Text(label) },
-        leadingIcon = if (selected) {
-            { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-        } else null,
-        colors      = FilterChipDefaults.filterChipColors(
-            selectedContainerColor   = color.copy(alpha = 0.12f),
-            selectedLabelColor       = color,
-            selectedLeadingIconColor = color,
-        ),
     )
 }
 

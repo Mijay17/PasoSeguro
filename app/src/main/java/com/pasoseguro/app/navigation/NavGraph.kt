@@ -14,6 +14,7 @@ import com.pasoseguro.app.screens.ExploreScreen
 import com.pasoseguro.app.screens.AlertsScreen
 import com.pasoseguro.app.screens.ContactsScreen
 import com.pasoseguro.app.screens.ConfigScreen
+import com.pasoseguro.app.screens.RouteScreen
 
 @Composable
 fun NavGraph(
@@ -44,6 +45,7 @@ fun NavGraph(
                 when (feature) {
                     Feature.NAVIGATE -> NavigateScreen(navController = navController)
                     Feature.SCAN    -> ExploreScreen(navController = navController)
+                    Feature.ROUTE    -> RouteScreen(navController = navController)
                     Feature.ALERTS   -> AlertsScreen(navController = navController)
                     Feature.CONTACTS -> ContactsScreen(navController = navController)
                     Feature.CONFIG   -> ConfigScreen(

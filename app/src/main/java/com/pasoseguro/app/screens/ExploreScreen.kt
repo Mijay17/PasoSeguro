@@ -53,6 +53,7 @@ import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.ui.theme.AlertRed
 import com.pasoseguro.app.ui.theme.ScanTeal
 import com.pasoseguro.app.ui.theme.ScanTealLight
+import com.pasoseguro.app.voice.rememberContextualVoiceListener
 import kotlinx.coroutines.delay
 
 // ── Cycling messages shown during analysis ─────────────────────────────────
@@ -78,6 +79,17 @@ fun ExploreScreen(navController: NavController) {
     }
     LaunchedEffect(prefs.hapticEnabled) {
         vm.updateHapticEnabled(prefs.hapticEnabled)
+    }
+
+    // ── Asistente IA por voz — escucha contextual, sin botón ────────────────
+    // Cada vez que el Asistente termina de hablar una indicación, se abre una
+    // breve ventana de 3 s donde el usuario puede decir "Volver" o "Inicio".
+    val contextualVoice = rememberContextualVoiceListener(
+        navController = navController,
+        speakThenRun  = vm::speakThenRun,
+    )
+    LaunchedEffect(vm) {
+        vm.speechFinished.collect { contextualVoice.listenBriefly() }
     }
 
     // Camera permission

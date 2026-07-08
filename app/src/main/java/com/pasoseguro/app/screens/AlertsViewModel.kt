@@ -42,7 +42,10 @@ data class AlertsUiState(
     val filteredEvents: List<AppEvent> = SIMULATED_EVENTS,
     val selectedFilter: EventMode?     = null,
     val searchQuery: String            = "",
+    val recentOnly: Boolean             = false,
 )
+
+private const val RECENT_WINDOW_MS = 3_600_000L // 1 hour
 
 // ── ViewModel ──────────────────────────────────────────────────────────────
 
@@ -55,7 +58,7 @@ class AlertsViewModel : ViewModel() {
         _uiState.update { state ->
             state.copy(
                 selectedFilter = mode,
-                filteredEvents = applyFilters(state.searchQuery, mode),
+                filteredEvents = applyFilters(state.searchQuery, mode, state.recentOnly),
             )
         }
     }
@@ -64,14 +67,25 @@ class AlertsViewModel : ViewModel() {
         _uiState.update { state ->
             state.copy(
                 searchQuery    = query,
-                filteredEvents = applyFilters(query, state.selectedFilter),
+                filteredEvents = applyFilters(query, state.selectedFilter, state.recentOnly),
             )
         }
     }
 
-    private fun applyFilters(query: String, mode: EventMode?): List<AppEvent> =
+    fun toggleRecentOnly() {
+        _uiState.update { state ->
+            val recentOnly = !state.recentOnly
+            state.copy(
+                recentOnly      = recentOnly,
+                filteredEvents  = applyFilters(state.searchQuery, state.selectedFilter, recentOnly),
+            )
+        }
+    }
+
+    private fun applyFilters(query: String, mode: EventMode?, recentOnly: Boolean): List<AppEvent> =
         SIMULATED_EVENTS
             .filter { mode == null || it.mode == mode }
+            .filter { !recentOnly || System.currentTimeMillis() - it.timestamp < RECENT_WINDOW_MS }
             .filter {
                 query.isBlank() ||
                 it.title.contains(query, ignoreCase = true) ||
