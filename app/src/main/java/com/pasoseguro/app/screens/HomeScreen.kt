@@ -18,6 +18,21 @@ import com.pasoseguro.app.data.InteractionMode
 import com.pasoseguro.app.navigation.Feature
 import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.utils.*
+import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
+import kotlinx.coroutines.delay
+
+// Bienvenida del Asistente IA — una entre varias, sin repetir la última
+// usada. Vive a nivel de archivo (no de composición) para que la variación
+// se respete incluso si el usuario vuelve a entrar a Home varias veces en
+// la misma sesión.
+private val welcomeMessages = NonRepeatingPicker(
+    listOf(
+        "Bienvenido a PasoSeguro. Soy tu asistente de navegación accesible. Desliza hacia la izquierda o hacia la derecha para explorar las funciones disponibles, o presiona dos veces el logotipo para hablar conmigo.",
+        "Hola, bienvenido a PasoSeguro. Estoy listo para ayudarte. Explora las funciones deslizando la pantalla o presiona dos veces el logotipo para darme una instrucción.",
+        "Bienvenido nuevamente a PasoSeguro. Desliza para conocer las funciones disponibles o presiona dos veces el logotipo si deseas hablar conmigo.",
+        "Hola. Soy tu asistente de navegación. Puedes recorrer las funciones deslizando la pantalla o comunicarte conmigo presionando dos veces el logotipo de PasoSeguro.",
+    ),
+)
 
 @Composable
 fun HomeScreen(navController: NavController) {
@@ -33,9 +48,29 @@ fun HomeScreen(navController: NavController) {
 
     DisposableEffect(Unit) { onDispose { tts.shutdown() } }
 
+    // Bienvenida — se dispara una sola vez al entrar a Home (LaunchedEffect
+    // con clave Unit no se repite en recomposiciones; si el usuario vuelve a
+    // entrar a esta pantalla, Compose crea una nueva instancia y sí vuelve a
+    // sonar, con un mensaje distinto al último).
+    LaunchedEffect(Unit) {
+        delay(700L)
+        tts.speak(welcomeMessages.next())
+    }
+
     val tapHandler = rememberDoubleTapHandler(tts = tts, prefs = prefs) { feature ->
         navController.navigate(feature.route)
     }
+
+    // ── Asistente IA por voz ────────────────────────────────────────────────
+    // Toda la lógica (permiso de mic, doble toque, reconocimiento y
+    // resolución de comandos globales) vive en voice/VoiceAssistantTrigger —
+    // reutilizada tal cual por el resto de las pantallas principales.
+    val assistantConfirm = rememberVoiceAssistantTrigger(
+        navController = navController,
+        onSpeak       = tts::speak,
+        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+        speakThenRun  = tts::speak,
+    )
 
     val features    = Feature.entries
     val topFeatures = listOf(Feature.CONTACTS, Feature.ALERTS, Feature.CONFIG)
@@ -91,6 +126,8 @@ fun HomeScreen(navController: NavController) {
                 longPressConfigFor = ::longPressConfigFor,
                 onSpeak            = tts::speak,
                 onHaptic           = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+                assistantPending   = assistantConfirm.isPending,
+                onAssistantTap     = assistantConfirm::onTap,
                 modifier           = Modifier.fillMaxSize(),
             )
         }
