@@ -7,13 +7,26 @@
 
 # ── Carpetas de build generadas automáticamente ───────────────────────────────
 # Nunca deben versionarse: se recrean con cada compilación.
+# **/build/ cubre además cualquier módulo futuro además de :app (hoy el único).
 /build/
 app/build/
+**/build/
 
-# ── Configuración local de la máquina ─────────────────────────────────────────
-# Contiene sdk.dir con la ruta ABSOLUTA del Android SDK en este equipo.
-# Si se sube, rompe el clone de cualquier otro desarrollador.
+# ── Native build (NDK / CMake) — no se usa hoy, pero se recrea automáticamente
+.cxx/
+.externalNativeBuild/
+
+# ── Capturas de Layout Inspector / Profiler y volcados de memoria ─────────────
+captures/
+*.hprof
+
+# ── Configuración local de la máquina y credenciales ──────────────────────────
+# local.properties contiene sdk.dir (ruta ABSOLUTA del SDK) y MAPS_API_KEY.
+# Si se sube, rompe el clone de otros desarrolladores y filtra la API key.
 local.properties
+secrets.properties
+key.properties
+keystore.properties
 
 # ── Sesiones del daemon de Kotlin ─────────────────────────────────────────────
 .kotlin/
@@ -28,6 +41,10 @@ local.properties
 .idea/deploymentTargetSelector.xml
 .idea/migrations.xml
 .idea/markdown.xml
+.idea/deviceManager.xml
+
+# Módulos .iml — regenerados por Android Studio, específicos del checkout local.
+*.iml
 
 # ── Artefactos compilados ─────────────────────────────────────────────────────
 *.apk

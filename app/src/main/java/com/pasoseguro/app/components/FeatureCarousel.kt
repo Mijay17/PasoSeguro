@@ -46,6 +46,8 @@ fun FeatureCarousel(
     longPressConfigFor: (Feature) -> LongPressConfig? = { null },
     onSpeak: (String) -> Unit = {},
     onHaptic: () -> Unit = {},
+    assistantPending: Boolean = false,
+    onAssistantTap: () -> Unit = {},
 ) {
     val features        = Feature.entries
     val actualPageCount = features.size + 1          // 7 logical slides
@@ -94,6 +96,8 @@ fun FeatureCarousel(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 4.dp),
+                        assistantPending = assistantPending,
+                        onAssistantTap   = onAssistantTap,
                     )
                 } else {
                     val feature = features[page - 1]

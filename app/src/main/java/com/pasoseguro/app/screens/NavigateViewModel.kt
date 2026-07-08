@@ -14,12 +14,17 @@ import com.pasoseguro.app.data.TtsSpeed
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.random.Random
@@ -49,7 +54,7 @@ internal val ALERT_SEQUENCE = listOf(
         recommendation = "Mantenga el dispositivo hacia adelante",
         severity = AlertSeverity.CLEAR, direction = ObstacleDirection.NONE,
         distanceMeters = null,
-        speakText = "Iniciando modo navegación. Monitoreando entorno.",
+        speakText = "Bienvenido al modo Navegar. La cámara está activa. Comenzando el monitoreo del entorno.",
         vibration = VibPattern.ONE,
     ),
     NavAlert(
@@ -170,6 +175,13 @@ private class NavigateTtsHelper(context: Context) {
     // CONFLATED: only one pending signal is kept — protects against stale signals.
     private val doneChannel = Channel<Unit>(Channel.CONFLATED)
 
+    // Serializa speakAndAwait: ahora dos flujos independientes pueden llamarlo
+    // (el loop de monitoreo y las respuestas del Asistente IA por voz) — sin
+    // este mutex, una llamada concurrente cortaría la otra a mitad de frase
+    // (ambas usan QUEUE_FLUSH) y podría dejar la primera esperando para
+    // siempre la señal de "onDone" de la segunda.
+    private val speechMutex = Mutex()
+
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -202,16 +214,17 @@ private class NavigateTtsHelper(context: Context) {
      * Falls back to a fixed [fallbackMs] delay when TTS is disabled or not yet ready.
      * A 30-second safety timeout prevents infinite suspension if the engine hangs.
      */
-    suspend fun speakAndAwait(text: String, fallbackMs: Long = 3500L) {
+    suspend fun speakAndAwait(text: String, fallbackMs: Long = 3500L) = speechMutex.withLock {
         if (!enabled || !ready) {
             delay(fallbackMs)
-            return
+            return@withLock
         }
         // Drain any stale signal left by a previous utterance
         doneChannel.tryReceive()
         tts?.setSpeechRate(speechRate)
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_MAIN)
         withTimeoutOrNull(30_000L) { doneChannel.receive() }
+        Unit
     }
 
     /**
@@ -247,6 +260,12 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
 
     private val _uiState = MutableStateFlow(NavigateUiState())
     val uiState: StateFlow<NavigateUiState> = _uiState.asStateFlow()
+
+    // Emite cada vez que el Asistente IA termina de hablar una indicación —
+    // NavigateScreen lo usa para abrir una breve ventana de escucha por voz
+    // (sin botón) sin acoplar el reconocimiento a esta ViewModel.
+    private val _speechFinished = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val speechFinished: SharedFlow<Unit> = _speechFinished.asSharedFlow()
 
     private var monitoringJob: Job? = null
     private var alertIndex = 0
@@ -286,6 +305,7 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
                     AlertSeverity.CLEAR   -> 3500L
                 }
                 ttsHelper.speakAndAwait(alert.speakText, fallback)
+                _speechFinished.tryEmit(Unit)
 
                 if (!isActive) break
 
@@ -320,6 +340,14 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
     fun resumeMonitoring() {
         if (_uiState.value.isMonitoring) return
         startMonitoringLoop()
+    }
+
+    /** Para el Asistente IA por voz: habla [text] y solo al terminar ejecuta [onDone]. */
+    fun speakThenRun(text: String, onDone: () -> Unit) {
+        viewModelScope.launch {
+            ttsHelper.speakAndAwait(text)
+            onDone()
+        }
     }
 
     /** Sync TTS prefs from ConfigScreen when they change. */

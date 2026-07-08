@@ -21,10 +21,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import com.pasoseguro.app.components.AssistantMicButton
+import com.pasoseguro.app.components.BarAction
+import com.pasoseguro.app.components.ProceduralBottomBar
 import com.pasoseguro.app.data.*
 import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.ui.theme.*
+import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.TtsHelper
+import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,6 +52,17 @@ fun ConfigScreen(
         tts.enabled = prefs.ttsEnabled
         tts.setSpeed(prefs.ttsSpeed)
     }
+
+    LaunchedEffect(Unit) {
+        tts.speak("Bienvenido a Configuración. Aquí puedes personalizar la aplicación según tus preferencias.")
+    }
+
+    val assistantConfirm = rememberVoiceAssistantTrigger(
+        navController = navController,
+        onSpeak       = tts::speak,
+        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+        speakThenRun  = tts::speak,
+    )
 
     // Local mutable copy for immediate UI feedback; saved to DataStore on each change
     var local by remember(prefs) { mutableStateOf(prefs) }
@@ -83,9 +99,65 @@ fun ConfigScreen(
                         )
                     }
                 },
+                actions = {
+                    AssistantMicButton(
+                        pending = assistantConfirm.isPending,
+                        onClick = assistantConfirm::onTap,
+                        tint    = MaterialTheme.colorScheme.primary,
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                 ),
+            )
+        },
+        bottomBar = {
+            val quickAppearanceOn = local.highContrast && local.largeFont
+
+            ProceduralBottomBar(
+                left = BarAction(
+                    icon           = Icons.Filled.TouchApp,
+                    label          = "Método",
+                    pendingMessage = "Has seleccionado Método de interacción. Presiona nuevamente para confirmar.",
+                    onConfirm      = {
+                        val newMode = if (local.interactionMode == InteractionMode.DOUBLE_TAP)
+                            InteractionMode.LONG_PRESS else InteractionMode.DOUBLE_TAP
+                        save(local.copy(interactionMode = newMode))
+                        tts.speak(
+                            if (newMode == InteractionMode.DOUBLE_TAP) "Método cambiado a doble toque."
+                            else "Método cambiado a pulsación prolongada."
+                        )
+                    },
+                ),
+                center = BarAction(
+                    icon           = Icons.Filled.Vibration,
+                    label          = if (local.hapticEnabled) "Vibración: ON" else "Vibración: OFF",
+                    selected       = local.hapticEnabled,
+                    pendingMessage = "Has seleccionado Vibración. Presiona nuevamente para confirmar.",
+                    onConfirm      = {
+                        val enabled = !local.hapticEnabled
+                        save(local.copy(hapticEnabled = enabled))
+                        tts.speak(if (enabled) "Vibración activada." else "Vibración desactivada.")
+                    },
+                ),
+                right = BarAction(
+                    icon           = Icons.Filled.Contrast,
+                    label          = "Apariencia",
+                    selected       = quickAppearanceOn,
+                    pendingMessage = "Has seleccionado Apariencia. Presiona nuevamente para confirmar.",
+                    onConfirm      = {
+                        val activate = !quickAppearanceOn
+                        save(local.copy(highContrast = activate, largeFont = activate))
+                        tts.speak(
+                            if (activate) "Alto contraste y texto grande activados."
+                            else "Alto contraste y texto grande desactivados."
+                        )
+                    },
+                ),
+                accentColor   = ConfigSlate,
+                tts           = tts,
+                hapticEnabled = local.hapticEnabled,
+                modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
         },
         containerColor = MaterialTheme.colorScheme.background,
