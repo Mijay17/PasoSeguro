@@ -3,6 +3,7 @@ package com.pasoseguro.app.components
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -26,6 +27,7 @@ import com.pasoseguro.app.ui.theme.Brand800
 import com.pasoseguro.app.utils.ConfirmProgressBar
 import com.pasoseguro.app.utils.LongPressConfig
 import com.pasoseguro.app.utils.rememberConfirmAction
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
@@ -72,6 +74,23 @@ fun FeatureCarousel(
 
     fun handleLeftTap()  { confirmRight.reset(); confirmLeft.onTap() }
     fun handleRightTap() { confirmLeft.reset();  confirmRight.onTap() }
+
+    // Anuncia por voz la función a la que se llega — antes solo pasaba al usar
+    // las flechas (indirectamente, vía el aviso de armado); un deslizamiento
+    // directo con el dedo no disparaba nada. `drop(1)` evita anunciar la
+    // página inicial al entrar a Home (ya la cubre su propio saludo) — solo
+    // anuncia cambios de página reales, sea por gesto táctil o por flecha.
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }
+            .drop(1)
+            .collect { absolutePage ->
+                val page = absolutePage % actualPageCount
+                if (page != 0) {
+                    val feature = features[page - 1]
+                    onSpeak("${feature.ttsText}. ${feature.description}")
+                }
+            }
+    }
 
     Column(
         modifier            = modifier,
@@ -124,26 +143,22 @@ fun FeatureCarousel(
                 )
             }
 
-            // Left arrow — two-tap confirm, decrement absolute index
+            // Left arrow — franja táctil de arriba a abajo, decrementa el índice absoluto
             CarouselArrowButton(
                 icon        = Icons.Filled.KeyboardArrowLeft,
                 contentDesc = "Opción anterior",
                 isPending   = confirmLeft.isPending,
                 onClick     = ::handleLeftTap,
-                modifier    = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 6.dp),
+                modifier    = Modifier.align(Alignment.CenterStart),
             )
 
-            // Right arrow — two-tap confirm, increment absolute index
+            // Right arrow — franja táctil de arriba a abajo, incrementa el índice absoluto
             CarouselArrowButton(
                 icon        = Icons.Filled.KeyboardArrowRight,
                 contentDesc = "Siguiente opción",
                 isPending   = confirmRight.isPending,
                 onClick     = ::handleRightTap,
-                modifier    = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 6.dp),
+                modifier    = Modifier.align(Alignment.CenterEnd),
             )
         }
 
@@ -159,6 +174,12 @@ fun FeatureCarousel(
 
 // ── Arrow button ───────────────────────────────────────────────────────────
 
+/**
+ * El área táctil ocupa toda la franja lateral correspondiente — de arriba a
+ * abajo, no solo el círculo visual — para que sea mucho más fácil de
+ * encontrar y presionar a ciegas. El círculo (con su estado armado/pendiente)
+ * sigue dibujándose centrado dentro de esa franja, sin cambiar la estética.
+ */
 @Composable
 private fun CarouselArrowButton(
     icon: ImageVector,
@@ -167,35 +188,41 @@ private fun CarouselArrowButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        onClick         = onClick,
-        modifier        = modifier
-            .size(52.dp)
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(88.dp)
+            .clickable(onClick = onClick)
             .semantics {
                 contentDescription = if (isPending)
                     "Confirmar: $contentDesc. Presiona de nuevo."
                 else
                     contentDesc
             },
-        shape           = CircleShape,
-        color           = if (isPending) AlertRed.copy(alpha = 0.10f)
-                          else           MaterialTheme.colorScheme.surface,
-        border          = if (isPending) BorderStroke(1.5.dp, AlertRed.copy(alpha = 0.65f))
-                          else           null,
-        shadowElevation = 6.dp,
-        tonalElevation  = if (isPending) 0.dp else 2.dp,
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier         = Modifier.fillMaxSize(),
+        Surface(
+            modifier        = Modifier.size(52.dp),
+            shape           = CircleShape,
+            color           = if (isPending) AlertRed.copy(alpha = 0.10f)
+                              else           MaterialTheme.colorScheme.surface,
+            border          = if (isPending) BorderStroke(1.5.dp, AlertRed.copy(alpha = 0.65f))
+                              else           null,
+            shadowElevation = 6.dp,
+            tonalElevation  = if (isPending) 0.dp else 2.dp,
         ) {
-            Icon(
-                imageVector        = icon,
-                contentDescription = null,
-                modifier           = Modifier.size(36.dp),
-                tint               = if (isPending) AlertRed
-                                     else           MaterialTheme.colorScheme.onSurface,
-            )
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier         = Modifier.fillMaxSize(),
+            ) {
+                Icon(
+                    imageVector        = icon,
+                    contentDescription = null,
+                    modifier           = Modifier.size(36.dp),
+                    tint               = if (isPending) AlertRed
+                                         else           MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }
