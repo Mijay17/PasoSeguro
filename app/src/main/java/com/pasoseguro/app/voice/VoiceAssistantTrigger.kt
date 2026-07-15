@@ -9,36 +9,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.navigation.NavController
+import com.pasoseguro.app.ui.LocalUserPreferences
+import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.utils.ConfirmActionState
+import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.rememberConfirmAction
 
 /**
- * Punto de entrada reutilizable al Asistente IA por voz para cualquier
- * pantalla con un botón dedicado (logo de Home, ícono de micrófono en un
- * TopAppBar, etc.). Centraliza en un solo lugar lo que, de no existir esto,
- * se repetiría en cada pantalla: el mismo patrón de doble pulsación del
- * resto de PasoSeguro (1er toque anuncia el asistente, 2do toque dice "Te
- * escucho." y arranca el micrófono), el permiso de RECORD_AUDIO, y la
- * resolución del comando reconocido vía [GlobalVoiceNavigationHandler].
- *
- * [speakThenRun] delega la síntesis de voz al motor TTS propio de la
- * pantalla que lo usa — este helper solo decide cuándo pedir que se hable y
- * cuándo, una vez terminado el audio, ejecutar la navegación resultante.
+ * Punto de entrada al Asistente IA para Home — el único lugar de la app que
+ * conserva el patrón de doble toque (1er toque anuncia el asistente, 2do
+ * toque dice "Te escucho." y escucha una vez), a diferencia de la escucha
+ * continua y automática de las otras 6 pantallas principales. Ya no crea su
+ * propio `SpeechRecognizer`/`TextToSpeech` — delega enteramente en el
+ * [VoiceInteractionManager] centralizado vía [VoiceInteractionManager.armOneShotListen],
+ * la misma instancia que usa el resto de la app.
  */
 @Composable
-fun rememberVoiceAssistantTrigger(
-    navController: NavController,
-    onSpeak: (String) -> Unit,
-    onHaptic: () -> Unit,
-    speakThenRun: (text: String, onSpoken: () -> Unit) -> Unit,
-): ConfirmActionState {
+fun rememberVoiceAssistantTrigger(): ConfirmActionState {
     val context = LocalContext.current
-
-    val globalVoice = remember(navController, speakThenRun) {
-        GlobalVoiceNavigationHandler(navController, speakThenRun)
-    }
-    val voiceManager = rememberVoiceCommandManager(onCommand = globalVoice::handle)
+    val prefs = LocalUserPreferences.current
+    val voice = LocalVoiceInteractionManager.current
 
     var micPermissionGranted by remember { mutableStateOf(hasRecordAudioPermission(context)) }
     var listenAfterPermission by remember { mutableStateOf(false) }
@@ -47,9 +37,9 @@ fun rememberVoiceAssistantTrigger(
     ) { granted ->
         micPermissionGranted = granted
         if (granted && listenAfterPermission) {
-            speakThenRun("Te escucho.") { voiceManager.startListening() }
+            voice.armOneShotListen()
         } else if (!granted) {
-            onSpeak("No pude acceder al micrófono. Revisa los permisos de la aplicación.")
+            voice.speak("No pude acceder al micrófono. Revisa los permisos de la aplicación.")
         }
         listenAfterPermission = false
     }
@@ -60,13 +50,13 @@ fun rememberVoiceAssistantTrigger(
             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
-        speakThenRun("Te escucho.") { voiceManager.startListening() }
+        voice.armOneShotListen()
     }
 
     return rememberConfirmAction(
         pendingMessage = "Asistente IA. Presiona nuevamente para comenzar a hablar.",
-        onSpeak        = onSpeak,
-        onHaptic       = onHaptic,
+        onSpeak        = voice::speak,
+        onHaptic       = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
         onConfirm      = ::beginListening,
     )
 }

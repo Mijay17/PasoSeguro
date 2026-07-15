@@ -21,16 +21,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import androidx.compose.foundation.lazy.rememberLazyListState
 import com.pasoseguro.app.components.AssistantMicButton
 import com.pasoseguro.app.components.BarAction
 import com.pasoseguro.app.components.ProceduralBottomBar
 import com.pasoseguro.app.data.*
 import com.pasoseguro.app.ui.LocalUserPreferences
+import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.ui.theme.*
 import com.pasoseguro.app.utils.HapticHelper
-import com.pasoseguro.app.utils.TtsHelper
-import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
+import com.pasoseguro.app.voice.ScreenVoiceCommand
+import com.pasoseguro.app.voice.ScreenVoiceContext
+import com.pasoseguro.app.voice.VoiceInteractionState
+import com.pasoseguro.app.voice.rememberAutoListenVoice
 import kotlinx.coroutines.launch
+
+// Índices de item dentro del LazyColumn de abajo — deben mantenerse en sync
+// con el orden real de los `item { }` si la lista cambia (ver comandos de
+// voz "configuración de voz"/"configuración de vibración").
+private const val VOICE_SECTION_INDEX = 3
+private const val VIBRATION_SECTION_INDEX = 8
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,29 +50,18 @@ fun ConfigScreen(
 ) {
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
-    val tts     = remember { TtsHelper(context) }
-
-    DisposableEffect(Unit) { onDispose { tts.shutdown() } }
+    val voice   = LocalVoiceInteractionManager.current
+    val listState = rememberLazyListState()
 
     // Read current preferences from CompositionLocal (kept in sync by MainActivity)
     val prefs = LocalUserPreferences.current
 
-    // Sync TTS settings whenever prefs change (or on first load)
-    LaunchedEffect(prefs.ttsEnabled, prefs.ttsSpeed) {
-        tts.enabled = prefs.ttsEnabled
-        tts.setSpeed(prefs.ttsSpeed)
-    }
-
     LaunchedEffect(Unit) {
-        tts.speak("Bienvenido a Configuración. Aquí puedes personalizar la aplicación según tus preferencias.")
+        // Sin "Configuración": el micrófono se arma casi al mismo tiempo que
+        // este mensaje suena (ver VoiceCommand.kt).
+        // flush=false: no cortar la confirmación de navegación que puede seguir sonando al entrar.
+        voice.speak("Aquí puedes personalizar la aplicación según tus preferencias.", flush = false)
     }
-
-    val assistantConfirm = rememberVoiceAssistantTrigger(
-        navController = navController,
-        onSpeak       = tts::speak,
-        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
-        speakThenRun  = tts::speak,
-    )
 
     // Local mutable copy for immediate UI feedback; saved to DataStore on each change
     var local by remember(prefs) { mutableStateOf(prefs) }
@@ -71,6 +70,40 @@ fun ConfigScreen(
         local = updated
         scope.launch { repository.save(updated) }
     }
+
+    val configVoiceContext = remember(local) {
+        ScreenVoiceContext(
+            screenName = "Configuración",
+            commands = listOf(
+                ScreenVoiceCommand(
+                    keywords = listOf("configuracion de voz", "abrir configuracion de voz", "ajustes de voz"),
+                    onRecognized = { scope.launch { listState.animateScrollToItem(VOICE_SECTION_INDEX) } },
+                    confirmationSpeech = buildString {
+                        append("Lectura por voz: ${if (local.ttsEnabled) "activada" else "desactivada"}. ")
+                        append(
+                            "Velocidad: ${
+                                when (local.ttsSpeed) {
+                                    TtsSpeed.SLOW   -> "lenta"
+                                    TtsSpeed.NORMAL -> "normal"
+                                    TtsSpeed.FAST   -> "rápida"
+                                }
+                            }."
+                        )
+                    },
+                ),
+                ScreenVoiceCommand(
+                    keywords = listOf(
+                        "configuracion de vibracion", "abrir configuracion de vibracion", "ajustes de vibracion",
+                    ),
+                    onRecognized = { scope.launch { listState.animateScrollToItem(VIBRATION_SECTION_INDEX) } },
+                    confirmationSpeech = "Vibración háptica: ${if (local.hapticEnabled) "activada" else "desactivada"}.",
+                ),
+            ),
+            helpHint = "En esta pantalla puedes decir: Configuración de voz, o Configuración de vibración.",
+        )
+    }
+    val activeVoice = rememberAutoListenVoice(configVoiceContext)
+    val voiceState by activeVoice.state.collectAsState()
 
     var showResetDialog by remember { mutableStateOf(false) }
 
@@ -88,7 +121,7 @@ fun ConfigScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = {
-                            tts.speak("Volver al inicio")
+                            voice.speak("Volviendo a la pantalla principal")
                             navController.popBackStack()
                         },
                     ) {
@@ -101,8 +134,8 @@ fun ConfigScreen(
                 },
                 actions = {
                     AssistantMicButton(
-                        pending = assistantConfirm.isPending,
-                        onClick = assistantConfirm::onTap,
+                        pending = voiceState != VoiceInteractionState.Idle,
+                        onClick = voice::requestHelp,
                         tint    = MaterialTheme.colorScheme.primary,
                     )
                 },
@@ -123,7 +156,7 @@ fun ConfigScreen(
                         val newMode = if (local.interactionMode == InteractionMode.DOUBLE_TAP)
                             InteractionMode.LONG_PRESS else InteractionMode.DOUBLE_TAP
                         save(local.copy(interactionMode = newMode))
-                        tts.speak(
+                        voice.speak(
                             if (newMode == InteractionMode.DOUBLE_TAP) "Método cambiado a doble toque."
                             else "Método cambiado a pulsación prolongada."
                         )
@@ -137,7 +170,7 @@ fun ConfigScreen(
                     onConfirm      = {
                         val enabled = !local.hapticEnabled
                         save(local.copy(hapticEnabled = enabled))
-                        tts.speak(if (enabled) "Vibración activada." else "Vibración desactivada.")
+                        voice.speak(if (enabled) "Vibración activada." else "Vibración desactivada.")
                     },
                 ),
                 right = BarAction(
@@ -148,14 +181,14 @@ fun ConfigScreen(
                     onConfirm      = {
                         val activate = !quickAppearanceOn
                         save(local.copy(highContrast = activate, largeFont = activate))
-                        tts.speak(
+                        voice.speak(
                             if (activate) "Alto contraste y texto grande activados."
                             else "Alto contraste y texto grande desactivados."
                         )
                     },
                 ),
                 accentColor   = ConfigSlate,
-                tts           = tts,
+                onSpeak       = voice::speak,
                 hapticEnabled = local.hapticEnabled,
                 modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
@@ -164,6 +197,7 @@ fun ConfigScreen(
     ) { padding ->
 
         LazyColumn(
+            state          = listState,
             modifier       = Modifier
                 .fillMaxSize()
                 .padding(padding),
@@ -184,7 +218,7 @@ fun ConfigScreen(
                             "Modo doble toque activado"
                         else
                             "Modo pulsación prolongada activado"
-                        tts.speak(label)
+                        voice.speak(label)
                     },
                 )
             }
@@ -201,8 +235,7 @@ fun ConfigScreen(
                     checked     = local.ttsEnabled,
                     onChecked   = { enabled ->
                         save(local.copy(ttsEnabled = enabled))
-                        tts.enabled = enabled
-                        if (enabled) tts.speak("Lectura por voz activada.")
+                        if (enabled) voice.speak("Lectura por voz activada.")
                     },
                     icon        = Icons.Filled.RecordVoiceOver,
                     iconDesc    = "Lectura por voz",
@@ -214,13 +247,12 @@ fun ConfigScreen(
                     enabled  = local.ttsEnabled,
                     onSelect = { speed ->
                         save(local.copy(ttsSpeed = speed))
-                        tts.setSpeed(speed)
                         val label = when (speed) {
                             TtsSpeed.SLOW   -> "Velocidad de voz: lenta."
                             TtsSpeed.NORMAL -> "Velocidad de voz: normal."
                             TtsSpeed.FAST   -> "Velocidad de voz: rápida."
                         }
-                        tts.speak(label)
+                        voice.speak(label)
                     },
                 )
             }
@@ -234,7 +266,7 @@ fun ConfigScreen(
                             ConfirmationPrompt.PRESS_AGAIN      -> "Mensaje: Presione nuevamente para continuar."
                             ConfirmationPrompt.HOLD_TWO_SECONDS -> "Mensaje: Mantenga presionado durante dos segundos."
                         }
-                        tts.speak(label)
+                        voice.speak(label)
                     },
                 )
             }
@@ -252,7 +284,7 @@ fun ConfigScreen(
                     onChecked   = { enabled ->
                         save(local.copy(hapticEnabled = enabled))
                         if (local.ttsEnabled) {
-                            tts.speak(
+                            voice.speak(
                                 if (enabled) "Vibración activada." else "Vibración desactivada."
                             )
                         }
@@ -274,7 +306,7 @@ fun ConfigScreen(
                     checked     = local.highContrast,
                     onChecked   = { enabled ->
                         save(local.copy(highContrast = enabled))
-                        tts.speak(
+                        voice.speak(
                             if (enabled) "Modo alto contraste activado." else "Modo alto contraste desactivado."
                         )
                     },
@@ -289,7 +321,7 @@ fun ConfigScreen(
                     checked     = local.largeFont,
                     onChecked   = { enabled ->
                         save(local.copy(largeFont = enabled))
-                        tts.speak(
+                        voice.speak(
                             if (enabled) "Texto grande activado." else "Texto grande desactivado."
                         )
                     },
@@ -350,11 +382,8 @@ fun ConfigScreen(
                 TextButton(
                     onClick = {
                         showResetDialog = false
-                        val defaults = UserPreferences.Default
-                        save(defaults)
-                        tts.enabled = defaults.ttsEnabled
-                        tts.setSpeed(defaults.ttsSpeed)
-                        tts.speak("Configuración restaurada.")
+                        save(UserPreferences.Default)
+                        voice.speak("Configuración restaurada.")
                     },
                 ) {
                     Text(

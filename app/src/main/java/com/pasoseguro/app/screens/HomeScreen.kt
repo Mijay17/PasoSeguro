@@ -17,6 +17,7 @@ import com.pasoseguro.app.components.PerimeterButton
 import com.pasoseguro.app.data.InteractionMode
 import com.pasoseguro.app.navigation.Feature
 import com.pasoseguro.app.ui.LocalUserPreferences
+import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.utils.*
 import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
 import kotlinx.coroutines.delay
@@ -38,15 +39,7 @@ private val welcomeMessages = NonRepeatingPicker(
 fun HomeScreen(navController: NavController) {
     val context = LocalContext.current
     val prefs   = LocalUserPreferences.current
-    val tts     = remember { TtsHelper(context) }
-
-    // Sync TTS settings whenever preferences change
-    LaunchedEffect(prefs.ttsEnabled, prefs.ttsSpeed) {
-        tts.enabled = prefs.ttsEnabled
-        tts.setSpeed(prefs.ttsSpeed)
-    }
-
-    DisposableEffect(Unit) { onDispose { tts.shutdown() } }
+    val voice   = LocalVoiceInteractionManager.current
 
     // Bienvenida — se dispara una sola vez al entrar a Home (LaunchedEffect
     // con clave Unit no se repite en recomposiciones; si el usuario vuelve a
@@ -54,23 +47,21 @@ fun HomeScreen(navController: NavController) {
     // sonar, con un mensaje distinto al último).
     LaunchedEffect(Unit) {
         delay(700L)
-        tts.speak(welcomeMessages.next())
+        // flush=false: si venimos de "Atrás"/"Inicio" desde otra pantalla, esa
+        // confirmación ("Volviendo a la pantalla...") todavía puede estar
+        // sonando — no queremos cortarla, sino que esta bienvenida se
+        // encole detrás y se escuche completa la secuencia.
+        voice.speak(welcomeMessages.next(), flush = false)
     }
 
-    val tapHandler = rememberDoubleTapHandler(tts = tts, prefs = prefs) { feature ->
+    val tapHandler = rememberDoubleTapHandler(onSpeak = voice::speak, prefs = prefs) { feature ->
         navController.navigate(feature.route)
     }
 
     // ── Asistente IA por voz ────────────────────────────────────────────────
-    // Toda la lógica (permiso de mic, doble toque, reconocimiento y
-    // resolución de comandos globales) vive en voice/VoiceAssistantTrigger —
-    // reutilizada tal cual por el resto de las pantallas principales.
-    val assistantConfirm = rememberVoiceAssistantTrigger(
-        navController = navController,
-        onSpeak       = tts::speak,
-        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
-        speakThenRun  = tts::speak,
-    )
+    // Home es la única pantalla que conserva el patrón de doble toque; el
+    // resto usa escucha automática y continua (ver voice/AutoListenScreen.kt).
+    val assistantConfirm = rememberVoiceAssistantTrigger()
 
     val features    = Feature.entries
     val topFeatures = listOf(Feature.CONTACTS, Feature.ALERTS, Feature.CONFIG)
@@ -90,7 +81,7 @@ fun HomeScreen(navController: NavController) {
         return LongPressConfig(
             onMidpoint = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
             onComplete = {
-                tts.speak("Abriendo ${feature.ttsText}")
+                voice.speak("Abriendo ${feature.ttsText}")
                 navController.navigate(feature.route)
             },
         )
@@ -124,7 +115,7 @@ fun HomeScreen(navController: NavController) {
                 pagerState         = pagerState,
                 onFeatureTap       = tapHandler::onTap,
                 longPressConfigFor = ::longPressConfigFor,
-                onSpeak            = tts::speak,
+                onSpeak            = voice::speak,
                 onHaptic           = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
                 assistantPending   = assistantConfirm.isPending,
                 onAssistantTap     = assistantConfirm::onTap,

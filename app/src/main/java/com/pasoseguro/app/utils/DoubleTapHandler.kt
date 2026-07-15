@@ -18,7 +18,7 @@ import com.pasoseguro.app.navigation.Feature
  */
 class DoubleTapHandler(
     private val context: Context,
-    private val tts: TtsHelper,
+    private val onSpeak: (String) -> Unit,
     private val prefs: UserPreferences,
     private val windowMs: Long = 2500L,
     private val onOpen: (Feature) -> Unit,
@@ -39,7 +39,7 @@ class DoubleTapHandler(
                 ConfirmationPrompt.PRESS_AGAIN      -> "Presione nuevamente para continuar."
                 ConfirmationPrompt.HOLD_TWO_SECONDS -> "Mantenga presionado durante dos segundos para abrir esta opción."
             }
-            tts.speak("${feature.ttsText}. ${feature.description} $confirmationHint")
+            onSpeak("${feature.ttsText}. ${feature.description} $confirmationHint")
             armedRoute = feature.route
             armedAt = now
         }
@@ -48,12 +48,12 @@ class DoubleTapHandler(
 
 @Composable
 fun rememberDoubleTapHandler(
-    tts: TtsHelper,
+    onSpeak: (String) -> Unit,
     prefs: UserPreferences,
     onOpen: (Feature) -> Unit,
 ): DoubleTapHandler {
     val context = LocalContext.current
-    return remember(tts, prefs) {
-        DoubleTapHandler(context = context, tts = tts, prefs = prefs, onOpen = onOpen)
+    return remember(prefs) {
+        DoubleTapHandler(context = context, onSpeak = onSpeak, prefs = prefs, onOpen = onOpen)
     }
 }

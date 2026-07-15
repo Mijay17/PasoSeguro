@@ -53,7 +53,9 @@ import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.ui.theme.AlertRed
 import com.pasoseguro.app.ui.theme.ScanTeal
 import com.pasoseguro.app.ui.theme.ScanTealLight
-import com.pasoseguro.app.voice.rememberContextualVoiceListener
+import com.pasoseguro.app.voice.ScreenVoiceCommand
+import com.pasoseguro.app.voice.ScreenVoiceContext
+import com.pasoseguro.app.voice.rememberAutoListenVoice
 import kotlinx.coroutines.delay
 
 // ── Cycling messages shown during analysis ─────────────────────────────────
@@ -74,23 +76,30 @@ fun ExploreScreen(navController: NavController) {
     val uiState by vm.uiState.collectAsState()
     val prefs   = LocalUserPreferences.current
 
-    LaunchedEffect(prefs.ttsEnabled, prefs.ttsSpeed) {
-        vm.updateTtsSettings(prefs.ttsEnabled, prefs.ttsSpeed)
-    }
     LaunchedEffect(prefs.hapticEnabled) {
         vm.updateHapticEnabled(prefs.hapticEnabled)
     }
 
-    // ── Asistente IA por voz — escucha contextual, sin botón ────────────────
-    // Cada vez que el Asistente termina de hablar una indicación, se abre una
-    // breve ventana de 3 s donde el usuario puede decir "Volver" o "Inicio".
-    val contextualVoice = rememberContextualVoiceListener(
-        navController = navController,
-        speakThenRun  = vm::speakThenRun,
-    )
-    LaunchedEffect(vm) {
-        vm.speechFinished.collect { contextualVoice.listenBriefly() }
+    // ── Asistente IA por voz — escucha automática y continua ────────────────
+    val exploreVoiceContext = remember {
+        ScreenVoiceContext(
+            screenName = "Explorar",
+            commands = listOf(
+                ScreenVoiceCommand(
+                    keywords            = listOf("explorar nuevamente", "analizar nuevamente", "explorar de nuevo"),
+                    onRecognized        = vm::restartExploration,
+                    confirmationSpeech  = null, // ya habla su propio mensaje de bienvenida
+                ),
+                ScreenVoiceCommand(
+                    keywords            = listOf("describir entorno", "describe el entorno", "que hay alrededor"),
+                    onRecognized        = vm::describeEnvironmentAgain,
+                    confirmationSpeech  = null, // ya re-habla la descripción por su cuenta
+                ),
+            ),
+            helpHint = "En esta pantalla puedes decir: Explorar nuevamente, o Describir entorno.",
+        )
     }
+    rememberAutoListenVoice(exploreVoiceContext)
 
     // Camera permission
     var cameraGranted by remember { mutableStateOf(false) }

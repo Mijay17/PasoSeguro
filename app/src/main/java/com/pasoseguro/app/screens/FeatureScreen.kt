@@ -13,29 +13,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.pasoseguro.app.navigation.Feature
-import com.pasoseguro.app.ui.LocalUserPreferences
+import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.ui.theme.TextOnDark
-import com.pasoseguro.app.utils.TtsHelper
 
 /** Placeholder destination screen. Announces its name via TTS on first composition. */
 @Composable
 fun FeatureScreen(feature: Feature, navController: NavController) {
-    val context = LocalContext.current
-    val prefs   = LocalUserPreferences.current
-    val tts     = remember { TtsHelper(context) }
+    val voice = LocalVoiceInteractionManager.current
 
-    DisposableEffect(feature) {
-        tts.enabled = prefs.ttsEnabled
-        tts.setSpeed(prefs.ttsSpeed)
-        tts.speak("Pantalla ${feature.ttsText}. Esta función estará disponible próximamente.")
-        onDispose { tts.shutdown() }
+    LaunchedEffect(feature) {
+        voice.speak("Pantalla ${feature.ttsText}. Esta función estará disponible próximamente.")
     }
 
     Scaffold(

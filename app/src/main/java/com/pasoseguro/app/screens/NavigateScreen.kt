@@ -42,7 +42,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.pasoseguro.app.ui.LocalUserPreferences
-import com.pasoseguro.app.voice.rememberContextualVoiceListener
+import com.pasoseguro.app.voice.ScreenVoiceCommand
+import com.pasoseguro.app.voice.ScreenVoiceContext
+import com.pasoseguro.app.voice.rememberAutoListenVoice
 
 // ── Main screen ────────────────────────────────────────────────────────────
 
@@ -53,24 +55,32 @@ fun NavigateScreen(navController: NavController) {
     val vm: NavigateViewModel = viewModel()
     val uiState by vm.uiState.collectAsState()
 
-    // Keep ViewModel in sync with ConfigScreen prefs
-    LaunchedEffect(prefs.ttsEnabled, prefs.ttsSpeed) {
-        vm.updateTtsSettings(prefs.ttsEnabled, prefs.ttsSpeed)
-    }
     LaunchedEffect(prefs.hapticEnabled) {
         vm.updateHapticEnabled(prefs.hapticEnabled)
     }
 
-    // ── Asistente IA por voz — escucha contextual, sin botón ────────────────
-    // Cada vez que el Asistente termina de hablar una indicación, se abre una
-    // breve ventana de 3 s donde el usuario puede decir "Volver" o "Inicio".
-    val contextualVoice = rememberContextualVoiceListener(
-        navController = navController,
-        speakThenRun  = vm::speakThenRun,
-    )
-    LaunchedEffect(vm) {
-        vm.speechFinished.collect { contextualVoice.listenBriefly() }
+    // ── Asistente IA por voz — escucha automática y continua ────────────────
+    val navigateVoiceContext = remember {
+        ScreenVoiceContext(
+            screenName = "Navegar",
+            commands = listOf(
+                ScreenVoiceCommand(
+                    keywords = listOf(
+                        "iniciar navegacion", "reanudar navegacion", "iniciar monitoreo", "reanudar monitoreo",
+                    ),
+                    onRecognized       = vm::resumeMonitoring,
+                    confirmationSpeech = "Reanudando el monitoreo.",
+                ),
+                ScreenVoiceCommand(
+                    keywords            = listOf("pausar navegacion", "pausar monitoreo", "detener monitoreo"),
+                    onRecognized        = vm::stopMonitoringForConfirm,
+                    confirmationSpeech  = null, // ya habla su propia pregunta de confirmación
+                ),
+            ),
+            helpHint = "En esta pantalla puedes decir: Iniciar navegación, o Pausar navegación.",
+        )
     }
+    rememberAutoListenVoice(navigateVoiceContext)
 
     // ── Camera permission ─────────────────────────────────────────────────
     var hasCameraPermission by remember {

@@ -32,16 +32,22 @@ import com.pasoseguro.app.components.AssistantMicButton
 import com.pasoseguro.app.components.BarAction
 import com.pasoseguro.app.components.ProceduralBottomBar
 import com.pasoseguro.app.ui.LocalUserPreferences
+import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.ui.theme.*
 import com.pasoseguro.app.utils.ConfirmActionState
 import com.pasoseguro.app.utils.ConfirmProgressBar
 import com.pasoseguro.app.utils.HapticHelper
-import com.pasoseguro.app.utils.TtsHelper
 import com.pasoseguro.app.utils.rememberConfirmAction
-import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
+import com.pasoseguro.app.voice.ScreenVoiceCommand
+import com.pasoseguro.app.voice.ScreenVoiceContext
+import com.pasoseguro.app.voice.VoiceInteractionState
+import com.pasoseguro.app.voice.rememberAutoListenVoice
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
+
+private const val READ_NOTIFICATIONS_COUNT = 5
 
 // ── Screen ─────────────────────────────────────────────────────────────────
 
@@ -52,36 +58,67 @@ fun AlertsScreen(navController: NavController) {
 
     val context = LocalContext.current
     val prefs   = LocalUserPreferences.current
-    val tts     = remember { TtsHelper(context) }
-    DisposableEffect(Unit) { onDispose { tts.shutdown() } }
-    LaunchedEffect(prefs.ttsEnabled, prefs.ttsSpeed) {
-        tts.enabled = prefs.ttsEnabled
-        tts.setSpeed(prefs.ttsSpeed)
+    val voice   = LocalVoiceInteractionManager.current
+    val scope   = rememberCoroutineScope()
+
+    val alertsVoiceContext = remember(uiState.filteredEvents) {
+        ScreenVoiceContext(
+            screenName = "Notificaciones",
+            commands = listOf(
+                ScreenVoiceCommand(
+                    keywords = listOf("leer notificaciones", "leer alertas", "leer eventos"),
+                    onRecognized = {
+                        scope.launch {
+                            val events = uiState.filteredEvents.take(READ_NOTIFICATIONS_COUNT)
+                            if (events.isEmpty()) {
+                                voice.speakAndAwait("No hay notificaciones registradas.")
+                            } else {
+                                events.forEach { event -> voice.speakAndAwait("${event.title}. ${event.description}") }
+                            }
+                        }
+                    },
+                    confirmationSpeech = "Leyendo notificaciones.",
+                ),
+                ScreenVoiceCommand(
+                    // Sin la palabra "repetir": ese matiz ya lo cubre el comando global Repetir;
+                    // esta frase busca específicamente la última alerta registrada, no la última locución.
+                    keywords = listOf("ultima alerta", "leer ultima alerta", "que paso"),
+                    onRecognized = {
+                        val last = uiState.filteredEvents.firstOrNull()
+                        voice.speak(last?.let { "${it.title}. ${it.description}" } ?: "No hay alertas registradas todavía.")
+                    },
+                ),
+            ),
+            helpHint = "En esta pantalla puedes decir: Leer notificaciones, o Última alerta.",
+        )
     }
+    val activeVoice = rememberAutoListenVoice(alertsVoiceContext)
+    val voiceState by activeVoice.state.collectAsState()
+
     LaunchedEffect(Unit) {
-        tts.speak("Bienvenido al Historial de actividad. Aquí encontrarás las alertas registradas durante el uso de PasoSeguro.")
+        // Sin "alertas": el micrófono se arma casi al mismo tiempo que este
+        // mensaje suena (ver VoiceCommand.kt).
+        // flush=false: no cortar la confirmación de navegación que puede seguir sonando al entrar.
+        voice.speak(
+            "Bienvenido al historial de actividad. Aquí encontrarás lo registrado durante el uso de PasoSeguro.",
+            flush = false,
+        )
     }
 
     val backConfirm = rememberConfirmAction(
         pendingMessage = "Has seleccionado regresar. Presiona nuevamente para confirmar.",
-        onSpeak        = tts::speak,
+        onSpeak        = voice::speak,
         onHaptic       = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
         onConfirm      = { navController.popBackStack() },
-    )
-
-    val assistantConfirm = rememberVoiceAssistantTrigger(
-        navController = navController,
-        onSpeak       = tts::speak,
-        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
-        speakThenRun  = tts::speak,
     )
 
     Scaffold(
         topBar = {
             AlertsTopBar(
-                eventCount       = uiState.filteredEvents.size,
-                backConfirm      = backConfirm,
-                assistantConfirm = assistantConfirm,
+                eventCount  = uiState.filteredEvents.size,
+                backConfirm = backConfirm,
+                voiceState  = voiceState,
+                onMicClick  = voice::requestHelp,
             )
         },
         bottomBar = {
@@ -98,7 +135,7 @@ fun AlertsScreen(navController: NavController) {
                     pendingMessage = "Has seleccionado Todos. Presiona nuevamente para confirmar.",
                     onConfirm      = {
                         vm.setFilter(null)
-                        tts.speak("Mostrando todos los registros.")
+                        voice.speak("Mostrando todos los registros.")
                     },
                 ),
                 center = BarAction(
@@ -107,7 +144,7 @@ fun AlertsScreen(navController: NavController) {
                     pendingMessage = "Has seleccionado $toggleLabel. Presiona nuevamente para confirmar.",
                     onConfirm      = {
                         vm.setFilter(toggleTarget)
-                        tts.speak("Modo $toggleLabel seleccionado.")
+                        voice.speak("Modo $toggleLabel seleccionado.")
                     },
                 ),
                 right = BarAction(
@@ -118,13 +155,13 @@ fun AlertsScreen(navController: NavController) {
                     onConfirm      = {
                         val activating = !uiState.recentOnly
                         vm.toggleRecentOnly()
-                        tts.speak(
+                        voice.speak(
                             if (activating) "Mostrando eventos recientes." else "Mostrando todos los eventos."
                         )
                     },
                 ),
                 accentColor   = AlertRed,
-                tts           = tts,
+                onSpeak       = voice::speak,
                 hapticEnabled = prefs.hapticEnabled,
                 modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
@@ -176,7 +213,8 @@ fun AlertsScreen(navController: NavController) {
 private fun AlertsTopBar(
     eventCount: Int,
     backConfirm: ConfirmActionState,
-    assistantConfirm: ConfirmActionState,
+    voiceState: VoiceInteractionState,
+    onMicClick: () -> Unit,
 ) {
     // Wrap in Column so the countdown strip appears flush below the app bar,
     // inside the topBar slot — Scaffold accounts for the full height automatically.
@@ -200,8 +238,8 @@ private fun AlertsTopBar(
             },
             actions = {
                 AssistantMicButton(
-                    pending = assistantConfirm.isPending,
-                    onClick = assistantConfirm::onTap,
+                    pending = voiceState != VoiceInteractionState.Idle,
+                    onClick = onMicClick,
                     tint    = MaterialTheme.colorScheme.onSurface,
                 )
                 IconButton(

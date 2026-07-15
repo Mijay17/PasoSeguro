@@ -26,7 +26,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pasoseguro.app.ui.theme.TextOnDark
 import com.pasoseguro.app.utils.HapticHelper
-import com.pasoseguro.app.utils.TtsHelper
 import com.pasoseguro.app.utils.rememberConfirmAction
 
 /**
@@ -53,7 +52,7 @@ fun ProceduralBottomBar(
     center: BarAction,
     right: BarAction,
     accentColor: Color,
-    tts: TtsHelper,
+    onSpeak: (String) -> Unit,
     hapticEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -79,7 +78,7 @@ fun ProceduralBottomBar(
                     ProceduralBarButton(
                         action = action,
                         accentColor = accentColor,
-                        tts = tts,
+                        onSpeak = onSpeak,
                         hapticEnabled = hapticEnabled,
                         modifier = Modifier.weight(1f),
                     )
@@ -93,14 +92,14 @@ fun ProceduralBottomBar(
 private fun ProceduralBarButton(
     action: BarAction,
     accentColor: Color,
-    tts: TtsHelper,
+    onSpeak: (String) -> Unit,
     hapticEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val confirm = rememberConfirmAction(
         pendingMessage = action.pendingMessage,
-        onSpeak = tts::speak,
+        onSpeak = onSpeak,
         onHaptic = { HapticHelper.vibrate(context, hapticEnabled) },
         onConfirm = action.onConfirm,
     )

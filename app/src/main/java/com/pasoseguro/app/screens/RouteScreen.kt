@@ -55,17 +55,20 @@ import com.pasoseguro.app.components.LimaCityCenter
 import com.pasoseguro.app.components.RouteGoogleMap
 import com.pasoseguro.app.routing.RouteSimulationEngine
 import com.pasoseguro.app.ui.LocalUserPreferences
+import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.ui.theme.AlertRed
 import com.pasoseguro.app.ui.theme.ContactGreen
 import com.pasoseguro.app.ui.theme.ContactGreen50
 import com.pasoseguro.app.ui.theme.NavBlue
 import com.pasoseguro.app.ui.theme.RouteAmber
 import com.pasoseguro.app.ui.theme.RouteAmberLight
-import com.pasoseguro.app.utils.ConfirmActionState
 import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.LOCATION_PERMISSIONS
 import com.pasoseguro.app.utils.hasLocationPermission
-import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
+import com.pasoseguro.app.voice.ScreenVoiceCommand
+import com.pasoseguro.app.voice.ScreenVoiceContext
+import com.pasoseguro.app.voice.VoiceInteractionState
+import com.pasoseguro.app.voice.rememberAutoListenVoice
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -127,10 +130,8 @@ fun RouteScreen(navController: NavController) {
     val prefs = LocalUserPreferences.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val voice = LocalVoiceInteractionManager.current
 
-    LaunchedEffect(prefs.ttsEnabled, prefs.ttsSpeed) {
-        vm.updateTtsSettings(prefs.ttsEnabled, prefs.ttsSpeed)
-    }
     LaunchedEffect(prefs.hapticEnabled) {
         vm.updateHapticEnabled(prefs.hapticEnabled)
     }
@@ -219,15 +220,40 @@ fun RouteScreen(navController: NavController) {
         }
     }
 
-    // ── Asistente IA por voz ────────────────────────────────────────────────
+    // ── Asistente IA por voz — escucha automática y continua ────────────────
     // Reutiliza los íconos de micrófono que ya existían (antes solo
-    // decorativos) en la barra de búsqueda y en la lista de favoritos.
-    val assistantConfirm = rememberVoiceAssistantTrigger(
-        navController = navController,
-        onSpeak       = { text -> vm.speakThenRun(text) {} },
-        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
-        speakThenRun  = vm::speakThenRun,
-    )
+    // decorativos/de armado) en la barra de búsqueda y en la lista de favoritos
+    // — ahora son indicadores de estado, el micrófono ya escucha solo.
+    val routeVoiceContext = remember(vm) {
+        ScreenVoiceContext(
+            screenName = "Ruta",
+            commands = listOf(
+                ScreenVoiceCommand(
+                    keywords            = listOf("buscar destino", "mostrar favoritos", "mostrar destinos"),
+                    onRecognized        = vm::showSavedDestinations,
+                    confirmationSpeech  = null, // ya habla su propio mensaje
+                ),
+                ScreenVoiceCommand(
+                    keywords = listOf("cancelar ruta", "cancelar navegacion", "detener ruta"),
+                    onRecognized = {
+                        // Lee el estado más reciente (no uno capturado al construir
+                        // este contexto) — evita reconstruir el contexto en cada
+                        // frame de la navegación simulada solo para mantenerlo fresco.
+                        val state = vm.uiState.value
+                        when {
+                            state.routeStarted -> vm.onCancelNavigationTap()
+                            state.routeInfo != null || state.phase == RoutePhase.SAVED -> vm.resetToSearch()
+                            else -> voice.speak("No hay ningún trayecto en curso ahora mismo.")
+                        }
+                    },
+                    confirmationSpeech = null, // cada rama ya habla su propia confirmación
+                ),
+            ),
+            helpHint = "En esta pantalla puedes decir: Buscar destino, Mostrar favoritos, o Cancelar ruta.",
+        )
+    }
+    val activeVoice = rememberAutoListenVoice(routeVoiceContext)
+    val voiceState by activeVoice.state.collectAsState()
 
     AnimatedContent(
         targetState = uiState.phase,
@@ -244,10 +270,11 @@ fun RouteScreen(navController: NavController) {
                     onHomeTap = ::onHomeTap,
                     cameraPositionState = cameraPositionState,
                     onLocationTap = ::onLocationTap,
-                    assistantConfirm = assistantConfirm,
+                    voiceState = voiceState,
+                    onMicClick = activeVoice::requestHelp,
                 )
             RoutePhase.SAVED ->
-                SavedPhaseScreen(vm = vm, uiState = uiState, assistantConfirm = assistantConfirm)
+                SavedPhaseScreen(vm = vm, uiState = uiState, voiceState = voiceState, onMicClick = activeVoice::requestHelp)
         }
     }
 }
@@ -272,7 +299,8 @@ private fun SearchPhaseScreen(
     onHomeTap: () -> Unit,
     cameraPositionState: CameraPositionState,
     onLocationTap: () -> Unit,
-    assistantConfirm: ConfirmActionState,
+    voiceState: VoiceInteractionState,
+    onMicClick: () -> Unit,
 ) {
     val destination = uiState.selectedDestination
     val routeInfo = uiState.routeInfo
@@ -366,7 +394,8 @@ private fun SearchPhaseScreen(
             query = uiState.searchQuery,
             onQueryChange = vm::onSearchQueryChange,
             onOpenDestinations = vm::showSavedDestinations,
-            assistantConfirm = assistantConfirm,
+            voiceState = voiceState,
+            onMicClick = onMicClick,
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
@@ -797,7 +826,8 @@ private fun SearchBarCard(
     query: String,
     onQueryChange: (String) -> Unit,
     onOpenDestinations: () -> Unit,
-    assistantConfirm: ConfirmActionState,
+    voiceState: VoiceInteractionState,
+    onMicClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -841,8 +871,8 @@ private fun SearchBarCard(
             )
             Spacer(Modifier.width(4.dp))
             AssistantMicButton(
-                pending  = assistantConfirm.isPending,
-                onClick  = assistantConfirm::onTap,
+                pending  = voiceState != VoiceInteractionState.Idle,
+                onClick  = onMicClick,
                 tint     = RouteAmber,
                 modifier = Modifier.size(36.dp),
             )
@@ -1006,7 +1036,8 @@ private fun LabeledCircleButton(
 private fun SavedPhaseScreen(
     vm: RouteViewModel,
     uiState: RouteUiState,
-    assistantConfirm: ConfirmActionState,
+    voiceState: VoiceInteractionState,
+    onMicClick: () -> Unit,
 ) {
     Column(
         Modifier
@@ -1063,18 +1094,18 @@ private fun SavedPhaseScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Surface(
-                onClick = assistantConfirm::onTap,
+                onClick = onMicClick,
                 modifier = Modifier
                     .size(60.dp)
                     .semantics {
                         contentDescription =
-                            if (assistantConfirm.isPending)
-                                "Confirmar: Asistente IA. Presiona nuevamente para comenzar a hablar."
+                            if (voiceState is VoiceInteractionState.Speaking)
+                                "Asistente IA hablando. Toca para interrumpir y pedir ayuda."
                             else
-                                "Asistente IA por voz. Doble toque para hablar."
+                                "Asistente IA por voz. El micrófono ya está escuchando."
                     },
                 shape = CircleShape,
-                color = if (assistantConfirm.isPending) RouteAmber.copy(alpha = 0.75f) else RouteAmber,
+                color = if (voiceState != VoiceInteractionState.Idle) RouteAmber.copy(alpha = 0.75f) else RouteAmber,
                 shadowElevation = 4.dp,
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -1083,7 +1114,7 @@ private fun SavedPhaseScreen(
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                if (assistantConfirm.isPending) "Confirmar" else "Asistente IA",
+                if (voiceState != VoiceInteractionState.Idle) "Escuchando" else "Asistente IA",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
