@@ -108,6 +108,7 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
     val uiState: StateFlow<ExploreUiState> = _uiState.asStateFlow()
 
     private var activeJob: Job? = null
+    private var wasBackgrounded = false
 
     init {
         startExploration()
@@ -196,6 +197,30 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
         // Sin "inicio": el micrófono sigue escuchando mientras esta frase suena
         // y "inicio" es palabra gatillo del comando global Inicio.
         voice.speak("¿Deseas salir de este modo? Presiona dos veces para confirmar.")
+    }
+
+    /**
+     * Pausa silenciosa al dejar de ser la pantalla activa (navegación a otra
+     * pantalla, sin destruir este ViewModel) — a diferencia de
+     * [stopExplorationForConfirm], no habla ningún mensaje. Idempotente.
+     */
+    fun pauseExploration() {
+        if (wasBackgrounded) return
+        wasBackgrounded = true
+        activeJob?.cancel()
+        activeJob = null
+        voice.stopSpeaking()
+    }
+
+    /**
+     * Reanuda tras [pauseExploration] — no-op si nunca se pausó (evita forzar
+     * la fase a READY en la primera entrada, que es lo que hace
+     * [resumeExploration] incondicionalmente).
+     */
+    fun resumeIfBackgrounded() {
+        if (!wasBackgrounded) return
+        wasBackgrounded = false
+        resumeExploration()
     }
 
     /**

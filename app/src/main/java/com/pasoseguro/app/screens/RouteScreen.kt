@@ -251,6 +251,8 @@ fun RouteScreen(navController: NavController) {
                 ),
             ),
             helpHint = "En esta pantalla puedes decir: Buscar destino, Mostrar favoritos, o Cancelar ruta.",
+            onActive = vm::resumeSimulatedNavigationIfNeeded,
+            onInactive = vm::pauseSimulatedNavigation,
         )
     }
     val activeVoice = rememberAutoListenVoice(routeVoiceContext)

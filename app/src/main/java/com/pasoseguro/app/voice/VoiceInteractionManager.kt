@@ -84,11 +84,23 @@ class VoiceInteractionManager private constructor(context: Context) {
      * guardar y pasarle de vuelta a [exitScreen] al salir — ver [activeGeneration].
      */
     fun enterScreen(context: ScreenVoiceContext): Long {
+        // Solo se considera cambio real de pantalla si el screenName
+        // (identificador estable) es distinto — evita disparar
+        // onInactive/onActive por una recomposición del mismo ScreenVoiceContext
+        // (p. ej. Alertas/Configuración lo reconstruyen cada vez que cambia su
+        // estado local, sin que el usuario haya navegado a otro lado).
+        val isNewScreen = activeScreen?.screenName != context.screenName
         val generation = ++nextGeneration
-        VoiceDebugLog.d("manager: ENTER SCREEN \"${context.screenName}\" gen=$generation (screen anterior=\"${activeScreen?.screenName}\")")
+        VoiceDebugLog.d("manager: ENTER SCREEN \"${context.screenName}\" gen=$generation (screen anterior=\"${activeScreen?.screenName}\", nueva=$isNewScreen)")
+        // La pantalla anterior (si registró onInactive) se pausa AHORA — no
+        // cuando su propio composable eventualmente se disponga (~300ms
+        // después, al terminar la animación de transición) — pero solo si de
+        // verdad se está dejando esa pantalla.
+        if (isNewScreen) activeScreen?.onInactive?.invoke()
         activeGeneration = generation
-        activeScreen = context
+        activeScreen = context   // se actualiza siempre: comandos/helpHint pueden haber cambiado aunque sea la misma pantalla
         recognition.startContinuousListening()
+        if (isNewScreen) context.onActive()
         return generation
     }
 
@@ -105,6 +117,7 @@ class VoiceInteractionManager private constructor(context: Context) {
             return
         }
         VoiceDebugLog.d("manager: EXIT SCREEN \"${activeScreen?.screenName}\" gen=$generation")
+        activeScreen?.onInactive?.invoke()   // cubre volver a Home, que no llama enterScreen
         activeScreen = null
         recognition.stopContinuousListening()
     }

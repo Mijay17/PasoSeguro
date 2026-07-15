@@ -81,6 +81,8 @@ fun NavigateScreen(navController: NavController) {
                 ),
             ),
             helpHint = "En esta pantalla puedes decir: Iniciar navegación, o Pausar navegación.",
+            onActive = vm::resumeMonitoring,
+            onInactive = vm::pauseMonitoring,
         )
     }
     rememberAutoListenVoice(navigateVoiceContext)

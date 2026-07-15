@@ -145,6 +145,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
     private var navJob: Job? = null
     private var hapticEnabled = true
     private var vibrationIntensity = VibrationIntensity.MEDIA
+    private var navPaused = false
     private val navigationEngine = NavigationSimulationEngine()
 
     // Velocidad de la navegación simulada — constante por ahora (facilita
@@ -392,6 +393,29 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
                     }
                 }
         }
+    }
+
+    /**
+     * Pausa silenciosa al dejar de ser la pantalla activa (navegación a otra
+     * pantalla, sin destruir este ViewModel) — corta la narración de la
+     * navegación simulada en curso, si la hay. Idempotente.
+     */
+    fun pauseSimulatedNavigation() {
+        if (navPaused) return
+        navPaused = true
+        navJob?.cancel()
+        voice.stopSpeaking()
+    }
+
+    /**
+     * Reanuda la navegación simulada tras [pauseSimulatedNavigation], solo si
+     * había una en curso y no había llegado ya a destino. No guarda el
+     * progreso exacto: reinicia el trayecto simulado desde el punto de partida.
+     */
+    fun resumeSimulatedNavigationIfNeeded() {
+        navPaused = false
+        if (!_uiState.value.routeStarted || _uiState.value.navArrived) return
+        startSimulatedNavigation()
     }
 
     // ── Prefs sync ─────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.pasoseguro.app.data.TtsSpeed
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -130,8 +131,21 @@ class TextToSpeechManager(context: Context) {
         pendingCompletions[utteranceId] = completion
         val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
         tts?.speak(text, mode, null, utteranceId)
-        withTimeoutOrNull(30_000L) { completion.await() }
-        pendingCompletions.remove(utteranceId)
+        try {
+            withTimeoutOrNull(30_000L) { completion.await() }
+        } catch (e: CancellationException) {
+            // La coroutine que esperaba esta locución fue cancelada desde
+            // afuera (p. ej. una pantalla que se pausa al dejar de estar
+            // activa) — cortar también el audio nativo, no solo dejar de
+            // esperarlo. withTimeoutOrNull no propaga su propia cancelación
+            // interna (la absorbe y devuelve null), así que cualquier
+            // CancellationException que llegue hasta aquí es cancelación
+            // externa real.
+            tts?.stop()
+            throw e   // nunca tragar CancellationException
+        } finally {
+            pendingCompletions.remove(utteranceId)
+        }
         Unit
     }
 

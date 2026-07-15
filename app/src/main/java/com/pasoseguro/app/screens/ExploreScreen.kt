@@ -97,6 +97,8 @@ fun ExploreScreen(navController: NavController) {
                 ),
             ),
             helpHint = "En esta pantalla puedes decir: Explorar nuevamente, o Describir entorno.",
+            onActive = vm::resumeIfBackgrounded,
+            onInactive = vm::pauseExploration,
         )
     }
     rememberAutoListenVoice(exploreVoiceContext)

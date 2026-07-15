@@ -175,6 +175,7 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
     private var alertIndex = 0
     private var hapticEnabled = true
     private var vibrationIntensity = VibrationIntensity.MEDIA
+    private var monitoringPaused = false
 
     init {
         // Give the TTS engine ~300 ms to initialize before the first alert.
@@ -249,8 +250,25 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
      * también por el comando de voz "Iniciar navegación"/"Reanudar navegación".
      */
     fun resumeMonitoring() {
+        monitoringPaused = false
         if (_uiState.value.isMonitoring) return
         startMonitoringLoop()
+    }
+
+    /**
+     * Pausa silenciosa al dejar de ser la pantalla activa (navegación a otra
+     * pantalla, sin destruir este ViewModel) — a diferencia de
+     * [stopMonitoringForConfirm], no habla ningún mensaje. Idempotente:
+     * llamarla dos veces seguidas sin un [resumeMonitoring] de por medio no
+     * vuelve a cancelar el job ni a cortar el TTS.
+     */
+    fun pauseMonitoring() {
+        if (monitoringPaused) return
+        monitoringPaused = true
+        monitoringJob?.cancel()
+        monitoringJob = null
+        voice.stopSpeaking()
+        _uiState.update { it.copy(isMonitoring = false) }
     }
 
     /** Sync haptic pref from ConfigScreen when it changes. */
