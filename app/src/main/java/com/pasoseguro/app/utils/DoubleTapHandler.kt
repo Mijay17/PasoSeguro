@@ -11,7 +11,8 @@ import com.pasoseguro.app.navigation.Feature
  * Encapsulates the accessible two-tap interaction:
  *
  *  • 1st tap → vibrate (if hapticEnabled) + speak feature name + confirmation prompt.
- *  • 2nd tap on the SAME feature within [windowMs] → open it.
+ *  • 2nd tap on the SAME feature within [windowMs] → stop that prompt (it's no longer
+ *    relevant) + open it, so the destination screen's own welcome message never overlaps it.
  *  • Different feature → re-arm on the new one.
  *  • Window expired → next tap is treated as 1st tap.
  */
@@ -20,6 +21,7 @@ class DoubleTapHandler(
     private val onSpeak: (String) -> Unit,
     private val prefs: UserPreferences,
     private val windowMs: Long = 2500L,
+    private val onStop: () -> Unit = {},
     private val onOpen: (Feature) -> Unit,
 ) {
     private var armedRoute: String? = null
@@ -31,6 +33,7 @@ class DoubleTapHandler(
 
         if (isSecondTap) {
             armedRoute = null
+            onStop()
             onOpen(feature)
         } else {
             HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
@@ -47,10 +50,11 @@ class DoubleTapHandler(
 fun rememberDoubleTapHandler(
     onSpeak: (String) -> Unit,
     prefs: UserPreferences,
+    onStop: () -> Unit = {},
     onOpen: (Feature) -> Unit,
 ): DoubleTapHandler {
     val context = LocalContext.current
     return remember(prefs) {
-        DoubleTapHandler(context = context, onSpeak = onSpeak, prefs = prefs, onOpen = onOpen)
+        DoubleTapHandler(context = context, onSpeak = onSpeak, prefs = prefs, onStop = onStop, onOpen = onOpen)
     }
 }

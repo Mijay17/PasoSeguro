@@ -41,28 +41,6 @@ fun HomeScreen(navController: NavController) {
     val prefs   = LocalUserPreferences.current
     val voice   = LocalVoiceInteractionManager.current
 
-    // Bienvenida — se dispara una sola vez al entrar a Home (LaunchedEffect
-    // con clave Unit no se repite en recomposiciones; si el usuario vuelve a
-    // entrar a esta pantalla, Compose crea una nueva instancia y sí vuelve a
-    // sonar, con un mensaje distinto al último).
-    LaunchedEffect(Unit) {
-        delay(700L)
-        // flush=false: si venimos de "Atrás"/"Inicio" desde otra pantalla, esa
-        // confirmación ("Volviendo a la pantalla...") todavía puede estar
-        // sonando — no queremos cortarla, sino que esta bienvenida se
-        // encole detrás y se escuche completa la secuencia.
-        voice.speak(welcomeMessages.next(), flush = false)
-    }
-
-    val tapHandler = rememberDoubleTapHandler(onSpeak = voice::speak, prefs = prefs) { feature ->
-        navController.navigate(feature.route)
-    }
-
-    // ── Asistente IA por voz ────────────────────────────────────────────────
-    // Home es la única pantalla que conserva el patrón de doble toque; el
-    // resto usa escucha automática y continua (ver voice/AutoListenScreen.kt).
-    val assistantConfirm = rememberVoiceAssistantTrigger()
-
     val features    = Feature.entries
     val topFeatures = listOf(Feature.CONTACTS, Feature.ALERTS, Feature.CONFIG)
     val botFeatures = listOf(Feature.NAVIGATE, Feature.SCAN, Feature.ROUTE)
@@ -74,6 +52,32 @@ fun HomeScreen(navController: NavController) {
     val actualPageCount = features.size + 1          // 7
     val startPage       = actualPageCount * 500      // 3 500  (middle of 7 000)
     val pagerState = rememberPagerState(initialPage = startPage, pageCount = { actualPageCount * 1_000 })
+
+    // Bienvenida + reset del carrusel — se dispara cada vez que se (re)entra a
+    // Home (LaunchedEffect con clave Unit se reinicia porque Compose Navigation
+    // descompone esta pantalla al salir y la recompone al volver — "Atrás",
+    // "Regresar", "Volver" e "Inicio" deben terminar siempre en el Home base).
+    // pagerState es la única excepción: por dentro usa rememberSaveable, así
+    // que sobrevive ese ciclo y recuerda la última tarjeta vista — por eso hay
+    // que reponerlo explícitamente al slide inicial aquí en cada (re)entrada.
+    LaunchedEffect(Unit) {
+        pagerState.scrollToPage(startPage)
+        delay(700L)
+        // flush=false: si venimos de "Atrás"/"Inicio" desde otra pantalla, esa
+        // confirmación ("Volviendo a la pantalla...") todavía puede estar
+        // sonando — no queremos cortarla, sino que esta bienvenida se
+        // encole detrás y se escuche completa la secuencia.
+        voice.speak(welcomeMessages.next(), flush = false)
+    }
+
+    val tapHandler = rememberDoubleTapHandler(onSpeak = voice::speak, prefs = prefs, onStop = voice::stopSpeaking) { feature ->
+        navController.navigate(feature.route)
+    }
+
+    // ── Asistente IA por voz ────────────────────────────────────────────────
+    // Home es la única pantalla que conserva el patrón de doble toque; el
+    // resto usa escucha automática y continua (ver voice/AutoListenScreen.kt).
+    val assistantConfirm = rememberVoiceAssistantTrigger()
 
     // Build a LongPressConfig for a given feature (null = use double-tap mode)
     fun longPressConfigFor(feature: Feature): LongPressConfig? {
