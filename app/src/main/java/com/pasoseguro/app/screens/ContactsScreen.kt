@@ -192,6 +192,7 @@ fun ContactsScreen(navController: NavController) {
                 accentColor   = feature.tint,
                 onSpeak       = voice::speak,
                 hapticEnabled = prefs.hapticEnabled,
+                vibrationIntensity = prefs.vibrationIntensity,
                 modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
         },
@@ -202,7 +203,7 @@ fun ContactsScreen(navController: NavController) {
                 contacts = visibleContacts,
                 padding  = padding,
                 onTap    = { contact ->
-                    HapticHelper.vibrate(context, prefs.hapticEnabled)
+                    HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
                     voice.speak("${contact.name}. ${contact.relation}. Teléfono ${contact.phone}.")
                 },
             )

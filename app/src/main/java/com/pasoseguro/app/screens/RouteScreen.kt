@@ -53,7 +53,6 @@ import com.pasoseguro.app.R
 import com.pasoseguro.app.components.AssistantMicButton
 import com.pasoseguro.app.components.LimaCityCenter
 import com.pasoseguro.app.components.RouteGoogleMap
-import com.pasoseguro.app.routing.RouteSimulationEngine
 import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.ui.theme.AlertRed
@@ -62,7 +61,6 @@ import com.pasoseguro.app.ui.theme.ContactGreen50
 import com.pasoseguro.app.ui.theme.NavBlue
 import com.pasoseguro.app.ui.theme.RouteAmber
 import com.pasoseguro.app.ui.theme.RouteAmberLight
-import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.LOCATION_PERMISSIONS
 import com.pasoseguro.app.utils.hasLocationPermission
 import com.pasoseguro.app.voice.ScreenVoiceCommand
@@ -134,6 +132,9 @@ fun RouteScreen(navController: NavController) {
 
     LaunchedEffect(prefs.hapticEnabled) {
         vm.updateHapticEnabled(prefs.hapticEnabled)
+    }
+    LaunchedEffect(prefs.vibrationIntensity) {
+        vm.updateVibrationIntensity(prefs.vibrationIntensity)
     }
 
     // ── Ubicación del usuario (Google Maps) ────────────────────────────────

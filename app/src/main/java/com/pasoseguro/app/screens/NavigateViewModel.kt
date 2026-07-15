@@ -8,6 +8,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.pasoseguro.app.data.VibrationIntensity
 import com.pasoseguro.app.voice.VoiceInteractionManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -123,7 +124,7 @@ internal data class NavigateUiState(
 
 // ── Vibration helper ───────────────────────────────────────────────────────
 
-internal fun vibratePattern(context: Context, pattern: VibPattern) {
+internal fun vibratePattern(context: Context, pattern: VibPattern, intensity: VibrationIntensity = VibrationIntensity.MEDIA) {
     if (pattern == VibPattern.NONE) return
     val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
@@ -131,14 +132,15 @@ internal fun vibratePattern(context: Context, pattern: VibPattern) {
         @Suppress("DEPRECATION")
         context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }
-    // Patrones intensificados (mayor duración + amplitud máxima) para que se
-    // sientan con total claridad — antes usaban DEFAULT_AMPLITUDE y pulsos cortos.
+    // El número de pulsos codifica el tipo/severidad de la alerta y no cambia
+    // con la preferencia del usuario; [intensity] solo escala la amplitud.
+    val amp = intensity.amplitude
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val effect = when (pattern) {
-            VibPattern.ONE   -> VibrationEffect.createOneShot(100, 255)
-            VibPattern.TWO   -> VibrationEffect.createWaveform(longArrayOf(0, 90, 100, 90), intArrayOf(0, 255, 0, 255), -1)
+            VibPattern.ONE   -> VibrationEffect.createOneShot(100, amp)
+            VibPattern.TWO   -> VibrationEffect.createWaveform(longArrayOf(0, 90, 100, 90), intArrayOf(0, amp, 0, amp), -1)
             VibPattern.THREE -> VibrationEffect.createWaveform(
-                longArrayOf(0, 90, 80, 90, 80, 110), intArrayOf(0, 255, 0, 255, 0, 255), -1,
+                longArrayOf(0, 90, 80, 90, 80, 110), intArrayOf(0, amp, 0, amp, 0, amp), -1,
             )
             VibPattern.NONE  -> return
         }
@@ -172,6 +174,7 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
     private var monitoringJob: Job? = null
     private var alertIndex = 0
     private var hapticEnabled = true
+    private var vibrationIntensity = VibrationIntensity.MEDIA
 
     init {
         // Give the TTS engine ~300 ms to initialize before the first alert.
@@ -214,7 +217,7 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
 
                 if (!isActive) break
 
-                if (hapticEnabled) vibratePattern(appContext, alert.vibration)
+                if (hapticEnabled) vibratePattern(appContext, alert.vibration, vibrationIntensity)
 
                 // Silence gap — gives the user time to process before the next alert
                 delay(Random.nextLong(3000L, 4001L))
@@ -253,6 +256,11 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
     /** Sync haptic pref from ConfigScreen when it changes. */
     fun updateHapticEnabled(enabled: Boolean) {
         hapticEnabled = enabled
+    }
+
+    /** Sync vibration intensity pref from ConfigScreen when it changes. */
+    fun updateVibrationIntensity(intensity: VibrationIntensity) {
+        vibrationIntensity = intensity
     }
 
     override fun onCleared() {

@@ -79,7 +79,7 @@ fun HomeScreen(navController: NavController) {
     fun longPressConfigFor(feature: Feature): LongPressConfig? {
         if (prefs.interactionMode != InteractionMode.LONG_PRESS) return null
         return LongPressConfig(
-            onMidpoint = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+            onMidpoint = { HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity) },
             onComplete = {
                 voice.speak("Abriendo ${feature.ttsText}")
                 navController.navigate(feature.route)
@@ -116,7 +116,7 @@ fun HomeScreen(navController: NavController) {
                 onFeatureTap       = tapHandler::onTap,
                 longPressConfigFor = ::longPressConfigFor,
                 onSpeak            = voice::speak,
-                onHaptic           = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+                onHaptic           = { HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity) },
                 assistantPending   = assistantConfirm.isPending,
                 onAssistantTap     = assistantConfirm::onTap,
                 modifier           = Modifier.fillMaxSize(),

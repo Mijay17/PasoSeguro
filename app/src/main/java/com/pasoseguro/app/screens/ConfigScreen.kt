@@ -54,7 +54,7 @@ private fun interactionModeChangedSpeech(mode: InteractionMode): String = when (
 // con el orden real de los `item { }` si la lista cambia (ver comandos de
 // voz "configuración de voz"/"configuración de vibración").
 private const val VOICE_SECTION_INDEX = 3
-private const val VIBRATION_SECTION_INDEX = 8
+private const val VIBRATION_SECTION_INDEX = 7
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,7 +110,18 @@ fun ConfigScreen(
                         "configuracion de vibracion", "abrir configuracion de vibracion", "ajustes de vibracion",
                     ),
                     onRecognized = { scope.launch { listState.animateScrollToItem(VIBRATION_SECTION_INDEX) } },
-                    confirmationSpeech = "Vibración háptica: ${if (local.hapticEnabled) "activada" else "desactivada"}.",
+                    confirmationSpeech = buildString {
+                        append("Vibración háptica: ${if (local.hapticEnabled) "activada" else "desactivada"}. ")
+                        append(
+                            "Intensidad: ${
+                                when (local.vibrationIntensity) {
+                                    VibrationIntensity.SUAVE   -> "suave"
+                                    VibrationIntensity.MEDIA   -> "media"
+                                    VibrationIntensity.INTENSA -> "intensa"
+                                }
+                            }."
+                        )
+                    },
                 ),
             ),
             helpHint = "En esta pantalla puedes decir: Configuración de voz, o Configuración de vibración.",
@@ -201,6 +212,7 @@ fun ConfigScreen(
                 accentColor   = ConfigSlate,
                 onSpeak       = voice::speak,
                 hapticEnabled = local.hapticEnabled,
+                vibrationIntensity = local.vibrationIntensity,
                 modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
         },
@@ -263,21 +275,6 @@ fun ConfigScreen(
                     },
                 )
             }
-            item {
-                ConfirmationPromptSelector(
-                    selected = local.confirmationPrompt,
-                    enabled  = local.ttsEnabled,
-                    onSelect = { prompt ->
-                        save(local.copy(confirmationPrompt = prompt))
-                        val label = when (prompt) {
-                            ConfirmationPrompt.PRESS_AGAIN      -> "Mensaje: Toca dos veces en la pantalla para confirmar."
-                            ConfirmationPrompt.HOLD_TWO_SECONDS -> "Mensaje: Mantén presionado durante dos segundos para confirmar."
-                        }
-                        voice.speak(label)
-                    },
-                )
-            }
-
             // ── VIBRACIÓN ─────────────────────────────────────────────────
             item { Spacer(Modifier.height(8.dp)) }
             item {
@@ -298,6 +295,22 @@ fun ConfigScreen(
                     },
                     icon        = Icons.Filled.Vibration,
                     iconDesc    = "Vibración háptica",
+                )
+            }
+            item {
+                VibrationIntensitySelector(
+                    selected = local.vibrationIntensity,
+                    enabled  = local.hapticEnabled,
+                    onSelect = { intensity ->
+                        save(local.copy(vibrationIntensity = intensity))
+                        HapticHelper.vibrate(context, true, intensity)
+                        val label = when (intensity) {
+                            VibrationIntensity.SUAVE   -> "Intensidad de vibración: suave."
+                            VibrationIntensity.MEDIA   -> "Intensidad de vibración: media."
+                            VibrationIntensity.INTENSA -> "Intensidad de vibración: intensa."
+                        }
+                        voice.speak(label)
+                    },
                 )
             }
 
@@ -638,6 +651,7 @@ private fun SpeedChip(
     enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    semanticsPrefix: String = "Velocidad",
 ) {
     val bg = when {
         isSelected && enabled -> MaterialTheme.colorScheme.primary
@@ -655,7 +669,7 @@ private fun SpeedChip(
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
             .clickable(onClick = onClick)
-            .semantics { contentDescription = "Velocidad $label${if (isSelected) ", seleccionada" else ""}" }
+            .semantics { contentDescription = "$semanticsPrefix $label${if (isSelected) ", seleccionada" else ""}" }
             .padding(horizontal = 8.dp),
     ) {
         Text(
@@ -667,13 +681,13 @@ private fun SpeedChip(
     }
 }
 
-// ── Confirmation prompt selector ───────────────────────────────────────────
+// ── Vibration intensity selector ───────────────────────────────────────────
 
 @Composable
-private fun ConfirmationPromptSelector(
-    selected: ConfirmationPrompt,
+private fun VibrationIntensitySelector(
+    selected: VibrationIntensity,
     enabled: Boolean,
-    onSelect: (ConfirmationPrompt) -> Unit,
+    onSelect: (VibrationIntensity) -> Unit,
 ) {
     Card(
         modifier  = Modifier.fillMaxWidth(),
@@ -684,15 +698,15 @@ private fun ConfirmationPromptSelector(
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector        = Icons.Filled.Campaign,
-                    contentDescription = "Mensaje de confirmación",
+                    imageVector        = Icons.Filled.Vibration,
+                    contentDescription = "Intensidad de vibración",
                     tint               = if (enabled) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier           = Modifier.size(28.dp),
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    text       = "Mensaje de confirmación",
+                    text       = "Intensidad de vibración",
                     fontWeight = FontWeight.SemiBold,
                     fontSize   = 16.sp,
                     color      = if (enabled) MaterialTheme.colorScheme.onSurface
@@ -700,39 +714,22 @@ private fun ConfirmationPromptSelector(
                 )
             }
             Spacer(Modifier.height(12.dp))
-
-            listOf(
-                ConfirmationPrompt.PRESS_AGAIN      to "Toca dos veces en la pantalla para confirmar.",
-                ConfirmationPrompt.HOLD_TWO_SECONDS to "Mantén presionado durante dos segundos para confirmar.",
-            ).forEach { (prompt, text) ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            if (selected == prompt && enabled)
-                                MaterialTheme.colorScheme.primaryContainer
-                            else
-                                androidx.compose.ui.graphics.Color.Transparent
-                        )
-                        .clickable(onClick = { if (enabled) onSelect(prompt) })
-                        .semantics {
-                            contentDescription = text + if (selected == prompt) ", seleccionado" else ""
-                        }
-                        .padding(12.dp),
-                ) {
-                    RadioButton(
-                        selected = selected == prompt,
-                        onClick  = { if (enabled) onSelect(prompt) },
-                        enabled  = enabled,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text     = "\"$text\"",
-                        fontSize = 13.sp,
-                        color    = if (enabled) MaterialTheme.colorScheme.onSurface
-                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(
+                    VibrationIntensity.SUAVE   to "Suave",
+                    VibrationIntensity.MEDIA   to "Media",
+                    VibrationIntensity.INTENSA to "Intensa",
+                ).forEach { (intensity, label) ->
+                    SpeedChip(
+                        label           = label,
+                        isSelected      = selected == intensity,
+                        enabled         = enabled,
+                        onClick         = { if (enabled) onSelect(intensity) },
+                        modifier        = Modifier.weight(1f),
+                        semanticsPrefix = "Intensidad",
                     )
                 }
             }

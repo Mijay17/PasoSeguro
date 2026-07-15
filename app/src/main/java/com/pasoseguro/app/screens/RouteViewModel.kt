@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.maps.model.LatLng
 import com.pasoseguro.app.components.LimaCityCenter
+import com.pasoseguro.app.data.VibrationIntensity
 import com.pasoseguro.app.routing.LocationDistanceHelper
 import com.pasoseguro.app.routing.NavigationSimulationEngine
 import com.pasoseguro.app.routing.RouteSimulationEngine
@@ -143,6 +144,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
 
     private var navJob: Job? = null
     private var hapticEnabled = true
+    private var vibrationIntensity = VibrationIntensity.MEDIA
     private val navigationEngine = NavigationSimulationEngine()
 
     // Velocidad de la navegación simulada — constante por ahora (facilita
@@ -380,7 +382,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
                     }
                     voice.speak(frame.instruction)
                     if (hapticEnabled) {
-                        vibratePattern(appContext, if (frame.arrived) VibPattern.ONE else VibPattern.TWO)
+                        vibratePattern(appContext, if (frame.arrived) VibPattern.ONE else VibPattern.TWO, vibrationIntensity)
                     }
                     if (frame.arrived) {
                         delay(300L)
@@ -396,6 +398,10 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
 
     fun updateHapticEnabled(enabled: Boolean) {
         hapticEnabled = enabled
+    }
+
+    fun updateVibrationIntensity(intensity: VibrationIntensity) {
+        vibrationIntensity = intensity
     }
 
     /** Cambia el ritmo de la próxima navegación simulada (no afecta una ya en curso). */

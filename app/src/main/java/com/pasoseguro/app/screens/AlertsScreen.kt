@@ -114,7 +114,7 @@ fun AlertsScreen(navController: NavController) {
                     navController.popBackStack()
                 },
                 onRecentClick = {
-                    HapticHelper.vibrate(context, prefs.hapticEnabled)
+                    HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
                     val activating = !uiState.recentOnly
                     vm.toggleRecentOnly()
                     voice.speak(if (activating) "Mostrando eventos recientes." else "Mostrando todos los eventos.")
@@ -157,6 +157,7 @@ fun AlertsScreen(navController: NavController) {
                 accentColor   = AlertRed,
                 onSpeak       = voice::speak,
                 hapticEnabled = prefs.hapticEnabled,
+                vibrationIntensity = prefs.vibrationIntensity,
                 modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
         },
@@ -197,7 +198,7 @@ fun AlertsScreen(navController: NavController) {
                             onTap = {
                                 // Accesibilidad: al seleccionar un evento de la lista, describir
                                 // su contenido de inmediato por voz.
-                                HapticHelper.vibrate(context, prefs.hapticEnabled)
+                                HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
                                 voice.speak("${event.title}. ${event.description}")
                             },
                         )

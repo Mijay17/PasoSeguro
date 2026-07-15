@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Ponemos un color de fondo plano (puedes cambiar el color) -->
+  <background android:drawable="@android:color/white" />
+
+  <!-- Versión con margen (ver ic_launcher_foreground.xml) para que las
+       máscaras adaptativas no corten el contenido de la imagen. -->
+  <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

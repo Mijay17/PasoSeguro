@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
-import com.pasoseguro.app.data.ConfirmationPrompt
 import com.pasoseguro.app.data.UserPreferences
 import com.pasoseguro.app.navigation.Feature
 
@@ -34,12 +33,10 @@ class DoubleTapHandler(
             armedRoute = null
             onOpen(feature)
         } else {
-            HapticHelper.vibrate(context, prefs.hapticEnabled)
-            val confirmationHint = when (prefs.confirmationPrompt) {
-                ConfirmationPrompt.PRESS_AGAIN      -> "Toca dos veces en la pantalla para confirmar."
-                ConfirmationPrompt.HOLD_TWO_SECONDS -> "Mantén presionado durante dos segundos para confirmar."
-            }
-            onSpeak("${feature.ttsText}. ${feature.description} $confirmationHint")
+            HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
+            // Este handler solo se usa en modo DOUBLE_TAP (ver HomeScreen.longPressConfigFor),
+            // así que el gesto a confirmar siempre es el mismo.
+            onSpeak("${feature.ttsText}. ${feature.description} Toca dos veces en la pantalla para confirmar.")
             armedRoute = feature.route
             armedAt = now
         }

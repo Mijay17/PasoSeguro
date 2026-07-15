@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ic_launcher.png ya trae el fondo azul a borde y el contenido con su
+    propio margen de seguridad, así que no necesita inset adicional: agregar
+    uno aquí solo encoge la imagen y deja ver el fondo blanco del ícono
+    adaptativo (launcher.xml) alrededor.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher"
+    android:insetLeft="0%"
+    android:insetTop="0%"
+    android:insetRight="0%"
+    android:insetBottom="0%" />

@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.pasoseguro.app.data.VibrationIntensity
 import com.pasoseguro.app.ui.theme.TextOnDark
 import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.rememberConfirmAction
@@ -54,6 +55,7 @@ fun ProceduralBottomBar(
     accentColor: Color,
     onSpeak: (String) -> Unit,
     hapticEnabled: Boolean,
+    vibrationIntensity: VibrationIntensity = VibrationIntensity.MEDIA,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -80,6 +82,7 @@ fun ProceduralBottomBar(
                         accentColor = accentColor,
                         onSpeak = onSpeak,
                         hapticEnabled = hapticEnabled,
+                        vibrationIntensity = vibrationIntensity,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -94,13 +97,14 @@ private fun ProceduralBarButton(
     accentColor: Color,
     onSpeak: (String) -> Unit,
     hapticEnabled: Boolean,
+    vibrationIntensity: VibrationIntensity,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val confirm = rememberConfirmAction(
         pendingMessage = action.pendingMessage,
         onSpeak = onSpeak,
-        onHaptic = { HapticHelper.vibrate(context, hapticEnabled) },
+        onHaptic = { HapticHelper.vibrate(context, hapticEnabled, vibrationIntensity) },
         onConfirm = action.onConfirm,
     )
 

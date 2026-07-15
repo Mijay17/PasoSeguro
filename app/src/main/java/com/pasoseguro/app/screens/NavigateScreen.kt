@@ -58,6 +58,9 @@ fun NavigateScreen(navController: NavController) {
     LaunchedEffect(prefs.hapticEnabled) {
         vm.updateHapticEnabled(prefs.hapticEnabled)
     }
+    LaunchedEffect(prefs.vibrationIntensity) {
+        vm.updateVibrationIntensity(prefs.vibrationIntensity)
+    }
 
     // ── Asistente IA por voz — escucha automática y continua ────────────────
     val navigateVoiceContext = remember {
