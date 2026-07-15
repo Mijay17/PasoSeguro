@@ -42,6 +42,16 @@ class VoiceInteractionManager private constructor(context: Context) {
     private var navigation: NavigationVoiceController? = null
     private var activeScreen: ScreenVoiceContext? = null
 
+    // Identifica de quién es la sesión de escucha activa. Compose Navigation
+    // (AnimatedContent, ver NavGraph.kt) mantiene la pantalla saliente montada
+    // durante toda la animación de transición mientras la entrante ya se montó
+    // y llamó enterScreen() — así que el exitScreen() de la pantalla vieja
+    // puede llegar DESPUÉS de que la nueva ya tomó el control. Sin este id,
+    // ese exitScreen() tardío pisaba el estado (y el reconocedor) que ya
+    // pertenecía a la pantalla nueva, dejando el micrófono muerto.
+    private var activeGeneration: Long = 0L
+    private var nextGeneration: Long = 0L
+
     private val _recognitionState = MutableStateFlow<VoiceInteractionState>(VoiceInteractionState.Idle)
     private val _state = MutableStateFlow<VoiceInteractionState>(VoiceInteractionState.Idle)
     val state: StateFlow<VoiceInteractionState> = _state.asStateFlow()
@@ -68,16 +78,33 @@ class VoiceInteractionManager private constructor(context: Context) {
         tts.setSpeed(speed)
     }
 
-    /** Registra los comandos de la pantalla activa y arranca (o mantiene) la escucha continua. */
-    fun enterScreen(context: ScreenVoiceContext) {
-        VoiceDebugLog.d("manager: ENTER SCREEN \"${context.screenName}\" (screen anterior=\"${activeScreen?.screenName}\")")
+    /**
+     * Registra los comandos de la pantalla activa y arranca (o mantiene) la
+     * escucha continua. Devuelve un id de sesión que el llamador debe
+     * guardar y pasarle de vuelta a [exitScreen] al salir — ver [activeGeneration].
+     */
+    fun enterScreen(context: ScreenVoiceContext): Long {
+        val generation = ++nextGeneration
+        VoiceDebugLog.d("manager: ENTER SCREEN \"${context.screenName}\" gen=$generation (screen anterior=\"${activeScreen?.screenName}\")")
+        activeGeneration = generation
         activeScreen = context
         recognition.startContinuousListening()
+        return generation
     }
 
-    /** Detiene la escucha continua — se llama al salir de una de las pantallas con voz automática. */
-    fun exitScreen() {
-        VoiceDebugLog.d("manager: EXIT SCREEN \"${activeScreen?.screenName}\"")
+    /**
+     * Detiene la escucha continua — se llama al salir de una de las
+     * pantallas con voz automática. [generation] es el id devuelto por el
+     * [enterScreen] correspondiente; si para cuando esto se ejecuta ya hay
+     * una sesión más nueva activa (otra pantalla ya entró), esta llamada
+     * queda obsoleta y no debe pisar el estado de esa sesión nueva.
+     */
+    fun exitScreen(generation: Long) {
+        if (generation != activeGeneration) {
+            VoiceDebugLog.d("manager: EXIT SCREEN ignorado (gen=$generation ya superada por gen=$activeGeneration)")
+            return
+        }
+        VoiceDebugLog.d("manager: EXIT SCREEN \"${activeScreen?.screenName}\" gen=$generation")
         activeScreen = null
         recognition.stopContinuousListening()
     }

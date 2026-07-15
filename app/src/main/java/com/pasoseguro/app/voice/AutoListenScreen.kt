@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -40,10 +41,16 @@ fun rememberAutoListenVoice(screenContext: ScreenVoiceContext): VoiceInteraction
         if (!permissionGranted) permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
+    // Guarda el id de sesión devuelto por enterScreen para pasárselo a
+    // exitScreen al salir — así el manager puede detectar y descartar un
+    // exitScreen tardío (llega después de que otra pantalla ya entró, por
+    // la animación de transición de NavGraph.kt) en vez de pisar la sesión
+    // activa de la pantalla nueva. Ver comentario en VoiceInteractionManager.
+    val sessionGeneration = remember { mutableLongStateOf(-1L) }
     LaunchedEffect(screenContext, permissionGranted) {
-        if (permissionGranted) voice.enterScreen(screenContext)
+        if (permissionGranted) sessionGeneration.longValue = voice.enterScreen(screenContext)
     }
-    DisposableEffect(Unit) { onDispose { voice.exitScreen() } }
+    DisposableEffect(Unit) { onDispose { voice.exitScreen(sessionGeneration.longValue) } }
 
     return voice
 }
