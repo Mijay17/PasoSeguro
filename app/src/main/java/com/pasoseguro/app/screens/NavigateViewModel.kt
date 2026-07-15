@@ -131,20 +131,24 @@ internal fun vibratePattern(context: Context, pattern: VibPattern) {
         @Suppress("DEPRECATION")
         context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }
+    // Patrones intensificados (mayor duración + amplitud máxima) para que se
+    // sientan con total claridad — antes usaban DEFAULT_AMPLITUDE y pulsos cortos.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val effect = when (pattern) {
-            VibPattern.ONE   -> VibrationEffect.createOneShot(60, VibrationEffect.DEFAULT_AMPLITUDE)
-            VibPattern.TWO   -> VibrationEffect.createWaveform(longArrayOf(0, 60, 110, 60), -1)
-            VibPattern.THREE -> VibrationEffect.createWaveform(longArrayOf(0, 60, 80, 60, 80, 80), -1)
+            VibPattern.ONE   -> VibrationEffect.createOneShot(100, 255)
+            VibPattern.TWO   -> VibrationEffect.createWaveform(longArrayOf(0, 90, 100, 90), intArrayOf(0, 255, 0, 255), -1)
+            VibPattern.THREE -> VibrationEffect.createWaveform(
+                longArrayOf(0, 90, 80, 90, 80, 110), intArrayOf(0, 255, 0, 255, 0, 255), -1,
+            )
             VibPattern.NONE  -> return
         }
         vibrator.vibrate(effect)
     } else {
         @Suppress("DEPRECATION")
         when (pattern) {
-            VibPattern.ONE   -> vibrator.vibrate(60)
-            VibPattern.TWO   -> vibrator.vibrate(longArrayOf(0, 60, 110, 60), -1)
-            VibPattern.THREE -> vibrator.vibrate(longArrayOf(0, 60, 80, 60, 80, 80), -1)
+            VibPattern.ONE   -> vibrator.vibrate(100)
+            VibPattern.TWO   -> vibrator.vibrate(longArrayOf(0, 90, 100, 90), -1)
+            VibPattern.THREE -> vibrator.vibrate(longArrayOf(0, 90, 80, 90, 80, 110), -1)
             VibPattern.NONE  -> {}
         }
     }

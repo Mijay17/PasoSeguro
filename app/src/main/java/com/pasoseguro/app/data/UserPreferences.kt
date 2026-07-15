@@ -12,8 +12,8 @@ enum class TtsSpeed(val rate: Float) {
 }
 
 enum class ConfirmationPrompt {
-    PRESS_AGAIN,      // "Presione nuevamente para continuar."
-    HOLD_TWO_SECONDS, // "Mantenga presionado durante dos segundos para abrir esta opción."
+    PRESS_AGAIN,      // "Toca dos veces en la pantalla para confirmar."
+    HOLD_TWO_SECONDS, // "Mantén presionado durante dos segundos para confirmar."
 }
 
 data class UserPreferences(

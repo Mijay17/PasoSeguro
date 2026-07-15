@@ -36,8 +36,8 @@ class DoubleTapHandler(
         } else {
             HapticHelper.vibrate(context, prefs.hapticEnabled)
             val confirmationHint = when (prefs.confirmationPrompt) {
-                ConfirmationPrompt.PRESS_AGAIN      -> "Presione nuevamente para continuar."
-                ConfirmationPrompt.HOLD_TWO_SECONDS -> "Mantenga presionado durante dos segundos para abrir esta opción."
+                ConfirmationPrompt.PRESS_AGAIN      -> "Toca dos veces en la pantalla para confirmar."
+                ConfirmationPrompt.HOLD_TWO_SECONDS -> "Mantén presionado durante dos segundos para confirmar."
             }
             onSpeak("${feature.ttsText}. ${feature.description} $confirmationHint")
             armedRoute = feature.route

@@ -54,7 +54,7 @@ fun rememberVoiceAssistantTrigger(): ConfirmActionState {
     }
 
     return rememberConfirmAction(
-        pendingMessage = "Asistente IA. Presiona nuevamente para comenzar a hablar.",
+        pendingMessage = "Asistente IA. Toca dos veces para comenzar a hablar.",
         onSpeak        = voice::speak,
         onHaptic       = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
         onConfirm      = ::beginListening,

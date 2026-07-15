@@ -43,7 +43,7 @@ fun AssistantMicButton(
             .semantics {
                 contentDescription =
                     if (pending)
-                        "Confirmar: Asistente IA. Presiona nuevamente para comenzar a hablar."
+                        "Confirmar: Asistente IA. Toca dos veces para comenzar a hablar."
                     else
                         "Asistente IA por voz. Doble toque para hablar."
             },

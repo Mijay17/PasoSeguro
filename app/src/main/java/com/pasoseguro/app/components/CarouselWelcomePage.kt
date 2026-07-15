@@ -71,7 +71,7 @@ fun CarouselWelcomePage(
                 .semantics {
                     contentDescription =
                         if (assistantPending)
-                            "Confirmar: Asistente IA. Presiona nuevamente para comenzar a hablar."
+                            "Confirmar: Asistente IA. Toca dos veces para comenzar a hablar."
                         else
                             "Logotipo de PasoSeguro. Doble toque para activar el Asistente IA por voz."
                 },

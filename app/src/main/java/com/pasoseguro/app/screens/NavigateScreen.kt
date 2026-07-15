@@ -574,7 +574,7 @@ private fun NavigationOverlayBar(
                 .semantics {
                     contentDescription =
                         if (closePendingConfirm)
-                            "Botón Salir activo. Presione nuevamente para confirmar salida."
+                            "Botón Salir activo. Toca dos veces para confirmar la salida."
                         else
                             "Botón Salir. ¿Desea volver al inicio? Presione dos veces para confirmar."
                 },

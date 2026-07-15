@@ -398,7 +398,7 @@ private fun ExploreTopBar(
                 .scale(if (closePendingConfirm) closePulse else 1f)
                 .semantics {
                     contentDescription = if (closePendingConfirm)
-                        "Botón Salir activo. Presione nuevamente para confirmar salida."
+                        "Botón Salir activo. Toca dos veces para confirmar la salida."
                     else
                         "Botón Salir. Presione dos veces para regresar al inicio."
                 },

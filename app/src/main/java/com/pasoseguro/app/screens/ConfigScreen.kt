@@ -36,6 +36,20 @@ import com.pasoseguro.app.voice.VoiceInteractionState
 import com.pasoseguro.app.voice.rememberAutoListenVoice
 import kotlinx.coroutines.launch
 
+/**
+ * Mensaje único y explícito para cuando cambia el método de interacción —
+ * usado tanto por el botón de la barra inferior como por el selector de
+ * tarjetas, para no tener dos redacciones distintas del mismo aviso. Dice
+ * explícitamente QUÉ gesto físico debe hacer el usuario de ahora en más, en
+ * vez de solo nombrar el modo.
+ */
+private fun interactionModeChangedSpeech(mode: InteractionMode): String = when (mode) {
+    InteractionMode.DOUBLE_TAP ->
+        "Método cambiado a doble toque. A partir de ahora, presiona dos veces seguidas para confirmar una acción."
+    InteractionMode.LONG_PRESS ->
+        "Método cambiado a pulsación prolongada. A partir de ahora, mantén presionado durante dos segundos para confirmar una acción."
+}
+
 // Índices de item dentro del LazyColumn de abajo — deben mantenerse en sync
 // con el orden real de los `item { }` si la lista cambia (ver comandos de
 // voz "configuración de voz"/"configuración de vibración").
@@ -151,22 +165,19 @@ fun ConfigScreen(
                 left = BarAction(
                     icon           = Icons.Filled.TouchApp,
                     label          = "Método",
-                    pendingMessage = "Has seleccionado Método de interacción. Presiona nuevamente para confirmar.",
+                    pendingMessage = "Cambiar método de interacción. Toca dos veces para confirmar.",
                     onConfirm      = {
                         val newMode = if (local.interactionMode == InteractionMode.DOUBLE_TAP)
                             InteractionMode.LONG_PRESS else InteractionMode.DOUBLE_TAP
                         save(local.copy(interactionMode = newMode))
-                        voice.speak(
-                            if (newMode == InteractionMode.DOUBLE_TAP) "Método cambiado a doble toque."
-                            else "Método cambiado a pulsación prolongada."
-                        )
+                        voice.speak(interactionModeChangedSpeech(newMode))
                     },
                 ),
                 center = BarAction(
                     icon           = Icons.Filled.Vibration,
                     label          = if (local.hapticEnabled) "Vibración: ON" else "Vibración: OFF",
                     selected       = local.hapticEnabled,
-                    pendingMessage = "Has seleccionado Vibración. Presiona nuevamente para confirmar.",
+                    pendingMessage = "Has seleccionado Vibración. Toca dos veces para confirmar.",
                     onConfirm      = {
                         val enabled = !local.hapticEnabled
                         save(local.copy(hapticEnabled = enabled))
@@ -177,7 +188,7 @@ fun ConfigScreen(
                     icon           = Icons.Filled.Contrast,
                     label          = "Apariencia",
                     selected       = quickAppearanceOn,
-                    pendingMessage = "Has seleccionado Apariencia. Presiona nuevamente para confirmar.",
+                    pendingMessage = "Has seleccionado Apariencia. Toca dos veces para confirmar.",
                     onConfirm      = {
                         val activate = !quickAppearanceOn
                         save(local.copy(highContrast = activate, largeFont = activate))
@@ -214,11 +225,7 @@ fun ConfigScreen(
                     selected = local.interactionMode,
                     onSelect = { mode ->
                         save(local.copy(interactionMode = mode))
-                        val label = if (mode == InteractionMode.DOUBLE_TAP)
-                            "Modo doble toque activado"
-                        else
-                            "Modo pulsación prolongada activado"
-                        voice.speak(label)
+                        voice.speak(interactionModeChangedSpeech(mode))
                     },
                 )
             }
@@ -263,8 +270,8 @@ fun ConfigScreen(
                     onSelect = { prompt ->
                         save(local.copy(confirmationPrompt = prompt))
                         val label = when (prompt) {
-                            ConfirmationPrompt.PRESS_AGAIN      -> "Mensaje: Presione nuevamente para continuar."
-                            ConfirmationPrompt.HOLD_TWO_SECONDS -> "Mensaje: Mantenga presionado durante dos segundos."
+                            ConfirmationPrompt.PRESS_AGAIN      -> "Mensaje: Toca dos veces en la pantalla para confirmar."
+                            ConfirmationPrompt.HOLD_TWO_SECONDS -> "Mensaje: Mantén presionado durante dos segundos para confirmar."
                         }
                         voice.speak(label)
                     },
@@ -695,8 +702,8 @@ private fun ConfirmationPromptSelector(
             Spacer(Modifier.height(12.dp))
 
             listOf(
-                ConfirmationPrompt.PRESS_AGAIN      to "Presione nuevamente para continuar.",
-                ConfirmationPrompt.HOLD_TWO_SECONDS to "Mantenga presionado durante dos segundos para abrir esta opción.",
+                ConfirmationPrompt.PRESS_AGAIN      to "Toca dos veces en la pantalla para confirmar.",
+                ConfirmationPrompt.HOLD_TWO_SECONDS to "Mantén presionado durante dos segundos para confirmar.",
             ).forEach { (prompt, text) ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

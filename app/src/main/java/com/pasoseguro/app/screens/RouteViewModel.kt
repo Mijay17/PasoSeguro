@@ -244,7 +244,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
         } else {
             // First tap — announce and arm
             _uiState.update { it.copy(destPendingConfirm = dest) }
-            voice.speak("Destino seleccionado: ${dest.name}. Presiona nuevamente para calcular el trayecto.")
+            voice.speak("Destino seleccionado: ${dest.name}. Toca dos veces para calcular el trayecto.")
             viewModelScope.launch {
                 delay(3_000L)
                 if (_uiState.value.destPendingConfirm?.id == dest.id) {
@@ -270,7 +270,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
             startSimulatedNavigation()
         } else {
             _uiState.update { it.copy(startPendingConfirm = true) }
-            voice.speak("Has seleccionado iniciar la navegación. Presiona nuevamente para comenzar.")
+            voice.speak("Has seleccionado iniciar la navegación. Toca dos veces para comenzar.")
             viewModelScope.launch {
                 delay(3_000L)
                 if (_uiState.value.startPendingConfirm) {
@@ -296,7 +296,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
             }
         } else {
             _uiState.update { it.copy(navCancelPendingConfirm = true) }
-            voice.speak("La navegación será cancelada. Presiona nuevamente para confirmar.")
+            voice.speak("La navegación será cancelada. Toca dos veces para confirmar.")
             viewModelScope.launch {
                 delay(3_000L)
                 if (_uiState.value.navCancelPendingConfirm) {
@@ -308,7 +308,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
 
     fun speakHomePrompt() {
         // Sin "inicio": el micrófono sigue escuchando mientras esta frase suena.
-        voice.speak("¿Deseas salir de este modo? Presiona nuevamente para confirmar.")
+        voice.speak("¿Deseas salir de este modo? Toca dos veces para confirmar.")
     }
 
     fun resetToSearch() {

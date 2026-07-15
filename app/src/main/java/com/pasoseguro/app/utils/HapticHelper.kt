@@ -8,7 +8,7 @@ import android.os.VibratorManager
 
 object HapticHelper {
 
-    /** Single short pulse (48 ms). Respects [enabled] flag. */
+    /** Single pulse (90 ms, amplitud máxima) — intensificado para que se sienta con claridad. Respects [enabled] flag. */
     fun vibrate(context: Context, enabled: Boolean = true) {
         if (!enabled) return
         val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -19,10 +19,10 @@ object HapticHelper {
             context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(48, VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrator.vibrate(VibrationEffect.createOneShot(90, 255))
         } else {
             @Suppress("DEPRECATION")
-            vibrator.vibrate(48)
+            vibrator.vibrate(90)
         }
     }
 }

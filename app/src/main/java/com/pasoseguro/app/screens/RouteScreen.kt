@@ -639,7 +639,7 @@ private fun StartRouteButton(
 ) {
     val label = if (pendingConfirm) "Confirmar" else "Iniciar ruta"
     val description = if (pendingConfirm) {
-        "Confirmar inicio de navegación. Presiona nuevamente para comenzar."
+        "Confirmar inicio de navegación. Toca dos veces para comenzar."
     } else {
         "Iniciar ruta. Doble pulsación para confirmar."
     }
@@ -734,7 +734,7 @@ private fun NavigationActiveCard(
 private fun CancelNavigationButton(pendingConfirm: Boolean, onTap: () -> Unit) {
     val label = if (pendingConfirm) "Confirmar cancelación" else "Cancelar navegación"
     val description = if (pendingConfirm) {
-        "Confirmar: cancelar navegación. Presiona nuevamente para confirmar."
+        "Confirmar: cancelar navegación. Toca dos veces para confirmar."
     } else {
         "Cancelar navegación. Doble pulsación para confirmar."
     }
@@ -1185,7 +1185,7 @@ private fun DestinationCard(
                 if (isPending) {
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        "Presiona nuevamente para calcular la ruta",
+                        "Toca dos veces para calcular la ruta",
                         style = MaterialTheme.typography.labelSmall,
                         color = RouteAmber,
                         fontWeight = FontWeight.Medium,

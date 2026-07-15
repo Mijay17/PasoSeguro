@@ -121,7 +121,7 @@ private fun ProceduralBarButton(
     val description = buildString {
         append(action.label)
         if (action.selected) append(", activo")
-        if (confirm.isPending) append(". Presiona nuevamente para confirmar.")
+        if (confirm.isPending) append(". Toca dos veces para confirmar.")
     }
 
     Column(

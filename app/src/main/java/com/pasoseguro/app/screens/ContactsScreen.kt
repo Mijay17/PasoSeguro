@@ -150,7 +150,7 @@ fun ContactsScreen(navController: NavController) {
                 left = BarAction(
                     icon           = Icons.Filled.PersonAdd,
                     label          = "Añadir",
-                    pendingMessage = "Has seleccionado Añadir contacto. Presiona nuevamente para confirmar.",
+                    pendingMessage = "Has seleccionado Añadir contacto. Presiona dos veces para confirmar.",
                     onConfirm      = {
                         voice.speak(ADD_CONTACT_STUB)
                     },
@@ -159,7 +159,7 @@ fun ContactsScreen(navController: NavController) {
                     BarAction(
                         icon           = Icons.Filled.ViewCarousel,
                         label          = "Carrusel",
-                        pendingMessage = "Has seleccionado Modo Carrusel. Presiona nuevamente para confirmar.",
+                        pendingMessage = "Has seleccionado Modo Carrusel. Presiona dos veces para confirmar.",
                         onConfirm      = {
                             viewMode = ContactViewMode.CAROUSEL
                             voice.speak("Modo Carrusel seleccionado.")
@@ -169,7 +169,7 @@ fun ContactsScreen(navController: NavController) {
                     BarAction(
                         icon           = Icons.Filled.ViewList,
                         label          = "Lista",
-                        pendingMessage = "Has seleccionado Modo Lista. Presiona nuevamente para confirmar.",
+                        pendingMessage = "Has seleccionado Modo Lista. Presiona dos veces para confirmar.",
                         onConfirm      = {
                             viewMode = ContactViewMode.LIST
                             voice.speak("Modo Lista seleccionado.")
@@ -180,7 +180,7 @@ fun ContactsScreen(navController: NavController) {
                     icon           = Icons.Filled.Star,
                     label          = "Favoritos",
                     selected       = favoritesOnly,
-                    pendingMessage = "Has seleccionado Favoritos. Presiona nuevamente para confirmar.",
+                    pendingMessage = "Has seleccionado Favoritos. Presiona dos veces para confirmar.",
                     onConfirm      = {
                         favoritesOnly = !favoritesOnly
                         voice.speak(
