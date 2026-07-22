@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.pasoseguro.app.data.VibrationIntensity
+import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.voice.VoiceInteractionManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -109,9 +111,16 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
 
     private var activeJob: Job? = null
     private var wasBackgrounded = false
+    private var hapticEnabled = true
+    private var vibrationIntensity = VibrationIntensity.MEDIA
 
     init {
         startExploration()
+    }
+
+    /** Pulso háptico previo a cualquier confirmación hablada — ver [HapticHelper]. */
+    private fun vibrate() {
+        if (hapticEnabled) HapticHelper.vibrate(appContext, true, vibrationIntensity)
     }
 
     // ── Exploration flow ───────────────────────────────────────────────────
@@ -165,6 +174,7 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
         val detail = ZONE_DETAILS[zone]?.random() ?: return
         activeJob?.cancel()
         _uiState.update { it.copy(activeZone = zone, zoneDetail = detail) }
+        vibrate()
         activeJob = viewModelScope.launch {
             voice.speakAndAwait(detail.speakText)
             delay(1_000L)
@@ -194,6 +204,7 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
     fun stopExplorationForConfirm() {
         activeJob?.cancel()
         activeJob = null
+        vibrate()
         // Sin "inicio": el micrófono sigue escuchando mientras esta frase suena
         // y "inicio" es palabra gatillo del comando global Inicio.
         voice.speak("¿Deseas salir de este modo? Presiona dos veces para confirmar.")
@@ -240,7 +251,13 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
         }
     }
 
-    fun updateHapticEnabled(enabled: Boolean) { /* reserved */ }
+    fun updateHapticEnabled(enabled: Boolean) {
+        hapticEnabled = enabled
+    }
+
+    fun updateVibrationIntensity(intensity: VibrationIntensity) {
+        vibrationIntensity = intensity
+    }
 
     override fun onCleared() {
         activeJob?.cancel()

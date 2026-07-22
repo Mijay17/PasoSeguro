@@ -9,6 +9,7 @@ import android.os.VibratorManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pasoseguro.app.data.VibrationIntensity
+import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.voice.VoiceInteractionManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -191,8 +192,8 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
     //
     // Timing contract per alert:
     //   1. Update UI (bounding box + card change instantly)
-    //   2. speakAndAwait → suspends until TTS finishes the FULL message
-    //   3. Vibrate (synchronized, plays after speech ends)
+    //   2. Vibrate immediately — the user perceives the haptic alert first
+    //   3. speakAndAwait → suspends until TTS finishes the FULL message
     //   4. Silence gap: 3–4 s of breathing room
     //   5. Advance index → repeat
 
@@ -204,6 +205,8 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
             while (isActive) {
                 val alert = ALERT_SEQUENCE[alertIndex]
                 _uiState.update { it.copy(alert = alert) }
+
+                if (hapticEnabled) vibratePattern(appContext, alert.vibration, vibrationIntensity)
 
                 val fallback = when (alert.severity) {
                     AlertSeverity.DANGER  -> 4000L
@@ -217,8 +220,6 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
                 voice.speakAndAwait(alert.speakText, fallback, flush = false)
 
                 if (!isActive) break
-
-                if (hapticEnabled) vibratePattern(appContext, alert.vibration, vibrationIntensity)
 
                 // Silence gap — gives the user time to process before the next alert
                 delay(Random.nextLong(3000L, 4001L))
@@ -239,6 +240,7 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
         monitoringJob?.cancel()
         monitoringJob = null
         _uiState.update { it.copy(isMonitoring = false) }
+        if (hapticEnabled) HapticHelper.vibrate(appContext, true, vibrationIntensity)
         // Sin "inicio": el micrófono sigue escuchando mientras esta frase suena
         // y "inicio" es palabra gatillo del comando global Inicio.
         voice.speak("¿Deseas salir de este modo? Presiona dos veces para confirmar.")

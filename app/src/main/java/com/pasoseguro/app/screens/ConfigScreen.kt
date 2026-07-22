@@ -1,12 +1,19 @@
 package com.pasoseguro.app.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -21,7 +28,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import androidx.compose.foundation.lazy.rememberLazyListState
 import com.pasoseguro.app.components.AssistantMicButton
 import com.pasoseguro.app.components.BarAction
 import com.pasoseguro.app.components.ProceduralBottomBar
@@ -29,7 +35,9 @@ import com.pasoseguro.app.data.*
 import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.ui.theme.*
+import com.pasoseguro.app.utils.ConfirmActionState
 import com.pasoseguro.app.utils.HapticHelper
+import com.pasoseguro.app.utils.rememberConfirmAction
 import com.pasoseguro.app.voice.ScreenVoiceCommand
 import com.pasoseguro.app.voice.ScreenVoiceContext
 import com.pasoseguro.app.voice.VoiceInteractionState
@@ -50,11 +58,75 @@ private fun interactionModeChangedSpeech(mode: InteractionMode): String = when (
         "Método cambiado a pulsación prolongada. A partir de ahora, mantén presionado durante dos segundos para confirmar una acción."
 }
 
-// Índices de item dentro del LazyColumn de abajo — deben mantenerse en sync
-// con el orden real de los `item { }` si la lista cambia (ver comandos de
-// voz "configuración de voz"/"configuración de vibración").
-private const val VOICE_SECTION_INDEX = 3
-private const val VIBRATION_SECTION_INDEX = 7
+// Las 3 pestañas de esta pantalla — cada una muestra únicamente su propio
+// contenido (ver `AnimatedContent` en el cuerpo de ConfigScreen). Los botones
+// de la barra inferior ya no son atajos de activar/desactivar: seleccionan
+// una de estas pestañas (reutilizando el campo `selected` de [BarAction] para
+// resaltar cuál está activa) siguiendo el mismo patrón de doble toque
+// (armar + confirmar) que el resto de los controles de esta pantalla.
+private enum class ConfigTab { METODO, VIBRACION, APARIENCIA }
+
+// Mensajes del primer toque (armar) de los 3 botones de pestaña — nombran el
+// botón y explican su función, sin ejecutar ninguna acción todavía.
+private const val METODO_TAB_DESCRIPTION =
+    "Método. Permite configurar el modo de interacción y las opciones de voz. Toca dos veces para confirmar."
+private const val VIBRACION_TAB_DESCRIPTION =
+    "Vibración. Permite configurar la respuesta háptica de la aplicación. Toca dos veces para confirmar."
+private const val APARIENCIA_TAB_DESCRIPTION =
+    "Apariencia. Permite configurar las opciones visuales de la aplicación. Toca dos veces para confirmar."
+
+// Resúmenes hablados reutilizados tanto por los comandos de voz
+// ("configuración de voz"/"configuración de vibración") como por el segundo
+// toque (confirmar) del botón de la barra inferior correspondiente — una
+// sola redacción por pestaña, sin duplicar el texto en dos lugares.
+private fun metodoAnnouncement(prefs: UserPreferences): String = buildString {
+    append("Mostrando Método. ")
+    append(
+        "Modo de interacción: ${
+            when (prefs.interactionMode) {
+                InteractionMode.DOUBLE_TAP -> "doble toque"
+                InteractionMode.LONG_PRESS -> "pulsación prolongada"
+            }
+        }. "
+    )
+    append("Lectura por voz: ${if (prefs.ttsEnabled) "activada" else "desactivada"}. ")
+    append(
+        "Velocidad: ${
+            when (prefs.ttsSpeed) {
+                TtsSpeed.SLOW   -> "lenta"
+                TtsSpeed.NORMAL -> "normal"
+                TtsSpeed.FAST   -> "rápida"
+            }
+        }."
+    )
+}
+
+private fun vibracionAnnouncement(prefs: UserPreferences): String = buildString {
+    append("Mostrando Vibración. ")
+    append("Vibración háptica: ${if (prefs.hapticEnabled) "activada" else "desactivada"}. ")
+    append(
+        "Intensidad: ${
+            when (prefs.vibrationIntensity) {
+                VibrationIntensity.SUAVE   -> "suave"
+                VibrationIntensity.MEDIA   -> "media"
+                VibrationIntensity.INTENSA -> "intensa"
+            }
+        }."
+    )
+}
+
+private fun aparienciaAnnouncement(prefs: UserPreferences): String = buildString {
+    append("Mostrando Apariencia. ")
+    append("Alto contraste: ${if (prefs.highContrast) "activado" else "desactivado"}. ")
+    append("Texto grande: ${if (prefs.largeFont) "activado" else "desactivado"}.")
+}
+
+// Restaurar configuración — flujo 100% accesible por voz/doble toque, sin
+// ningún diálogo visual (ver [rememberConfirmAction] más abajo).
+private const val RESET_DESCRIPTION =
+    "Restaurar configuración. Restablece todos los ajustes a sus valores predeterminados. Toca dos veces para confirmar."
+private const val RESET_RESULT_MESSAGE =
+    "La configuración ha sido restaurada correctamente a los valores predeterminados."
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,10 +137,19 @@ fun ConfigScreen(
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
     val voice   = LocalVoiceInteractionManager.current
-    val listState = rememberLazyListState()
 
     // Read current preferences from CompositionLocal (kept in sync by MainActivity)
     val prefs = LocalUserPreferences.current
+
+    var selectedTab by remember { mutableStateOf(ConfigTab.METODO) }
+
+    // Un ScrollState por pestaña, con vida en ConfigScreen (no dentro de cada
+    // *TabContent) para que sobreviva al cambio de pestaña — AnimatedContent
+    // dispone la subcomposición saliente, así que un ScrollState creado ADENTRO
+    // de esa subcomposición se perdería y el scroll volvería siempre al tope.
+    val metodoScroll = rememberScrollState()
+    val vibracionScroll = rememberScrollState()
+    val aparienciaScroll = rememberScrollState()
 
     LaunchedEffect(Unit) {
         // Sin "Configuración": el micrófono se arma casi al mismo tiempo que
@@ -85,52 +166,68 @@ fun ConfigScreen(
         scope.launch { repository.save(updated) }
     }
 
+    // Restaurar configuración — mismo patrón de doble toque (armar + confirmar)
+    // que el resto de los controles de esta pantalla, vía la infraestructura ya
+    // existente de [rememberConfirmAction] (usada también por ProceduralBottomBar
+    // y por los botones de doble toque de Ruta/Home). Sin diálogo visual: el
+    // primer toque vibra y anuncia qué hace el botón; el segundo confirma y
+    // ejecuta la restauración, anunciando el resultado por voz.
+    val resetConfirm = rememberConfirmAction(
+        pendingMessage = RESET_DESCRIPTION,
+        onSpeak = voice::speak,
+        onHaptic = { HapticHelper.vibrate(context, local.hapticEnabled, local.vibrationIntensity) },
+        onConfirm = {
+            save(UserPreferences.Default)
+            voice.speak(RESET_RESULT_MESSAGE)
+        },
+    )
+
     val configVoiceContext = remember(local) {
         ScreenVoiceContext(
             screenName = "Configuración",
             commands = listOf(
                 ScreenVoiceCommand(
                     keywords = listOf("configuracion de voz", "abrir configuracion de voz", "ajustes de voz"),
-                    onRecognized = { scope.launch { listState.animateScrollToItem(VOICE_SECTION_INDEX) } },
-                    confirmationSpeech = buildString {
-                        append("Lectura por voz: ${if (local.ttsEnabled) "activada" else "desactivada"}. ")
-                        append(
-                            "Velocidad: ${
-                                when (local.ttsSpeed) {
-                                    TtsSpeed.SLOW   -> "lenta"
-                                    TtsSpeed.NORMAL -> "normal"
-                                    TtsSpeed.FAST   -> "rápida"
-                                }
-                            }."
-                        )
-                    },
+                    onRecognized = { selectedTab = ConfigTab.METODO },
+                    confirmationSpeech = metodoAnnouncement(local),
                 ),
                 ScreenVoiceCommand(
                     keywords = listOf(
                         "configuracion de vibracion", "abrir configuracion de vibracion", "ajustes de vibracion",
                     ),
-                    onRecognized = { scope.launch { listState.animateScrollToItem(VIBRATION_SECTION_INDEX) } },
-                    confirmationSpeech = buildString {
-                        append("Vibración háptica: ${if (local.hapticEnabled) "activada" else "desactivada"}. ")
-                        append(
-                            "Intensidad: ${
-                                when (local.vibrationIntensity) {
-                                    VibrationIntensity.SUAVE   -> "suave"
-                                    VibrationIntensity.MEDIA   -> "media"
-                                    VibrationIntensity.INTENSA -> "intensa"
-                                }
-                            }."
-                        )
+                    onRecognized = { selectedTab = ConfigTab.VIBRACION },
+                    confirmationSpeech = vibracionAnnouncement(local),
+                ),
+                // Accesibilidad del botón "Restaurar configuración": estos 3
+                // comandos reutilizan el mismo [ConfirmActionState] que maneja el
+                // toque físico — armar, confirmar y cancelar completamente por voz,
+                // sin depender de ningún diálogo visual.
+                ScreenVoiceCommand(
+                    keywords = listOf("restaurar configuracion", "restablecer configuracion", "restaurar valores predeterminados"),
+                    onRecognized = { if (!resetConfirm.isPending) resetConfirm.onTap() },
+                    confirmationSpeech = null,
+                ),
+                ScreenVoiceCommand(
+                    keywords = listOf("confirmar restauracion", "aceptar restauracion", "restaurar ahora"),
+                    onRecognized = { if (resetConfirm.isPending) resetConfirm.onTap() },
+                    confirmationSpeech = null,
+                ),
+                ScreenVoiceCommand(
+                    keywords = listOf("cancelar restauracion", "no restaurar"),
+                    onRecognized = {
+                        if (resetConfirm.isPending) {
+                            resetConfirm.reset()
+                            voice.speak("Restauración cancelada.")
+                        }
                     },
+                    confirmationSpeech = null,
                 ),
             ),
-            helpHint = "En esta pantalla puedes decir: Configuración de voz, o Configuración de vibración.",
+            helpHint = "En esta pantalla puedes decir: Configuración de voz, Configuración de vibración, o Restaurar configuración.",
         )
     }
     val activeVoice = rememberAutoListenVoice(configVoiceContext)
     val voiceState by activeVoice.state.collectAsState()
-
-    var showResetDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -146,6 +243,7 @@ fun ConfigScreen(
                 navigationIcon = {
                     IconButton(
                         onClick = {
+                            HapticHelper.vibrate(context, local.hapticEnabled, local.vibrationIntensity)
                             voice.speak("Volviendo a la pantalla principal")
                             navController.popBackStack()
                         },
@@ -170,43 +268,35 @@ fun ConfigScreen(
             )
         },
         bottomBar = {
-            val quickAppearanceOn = local.highContrast && local.largeFont
-
             ProceduralBottomBar(
                 left = BarAction(
                     icon           = Icons.Filled.TouchApp,
                     label          = "Método",
-                    pendingMessage = "Cambiar método de interacción. Toca dos veces para confirmar.",
+                    selected       = selectedTab == ConfigTab.METODO,
+                    pendingMessage = METODO_TAB_DESCRIPTION,
                     onConfirm      = {
-                        val newMode = if (local.interactionMode == InteractionMode.DOUBLE_TAP)
-                            InteractionMode.LONG_PRESS else InteractionMode.DOUBLE_TAP
-                        save(local.copy(interactionMode = newMode))
-                        voice.speak(interactionModeChangedSpeech(newMode))
+                        selectedTab = ConfigTab.METODO
+                        voice.speak(metodoAnnouncement(local))
                     },
                 ),
                 center = BarAction(
                     icon           = Icons.Filled.Vibration,
-                    label          = if (local.hapticEnabled) "Vibración: ON" else "Vibración: OFF",
-                    selected       = local.hapticEnabled,
-                    pendingMessage = "Has seleccionado Vibración. Toca dos veces para confirmar.",
+                    label          = "Vibración",
+                    selected       = selectedTab == ConfigTab.VIBRACION,
+                    pendingMessage = VIBRACION_TAB_DESCRIPTION,
                     onConfirm      = {
-                        val enabled = !local.hapticEnabled
-                        save(local.copy(hapticEnabled = enabled))
-                        voice.speak(if (enabled) "Vibración activada." else "Vibración desactivada.")
+                        selectedTab = ConfigTab.VIBRACION
+                        voice.speak(vibracionAnnouncement(local))
                     },
                 ),
                 right = BarAction(
                     icon           = Icons.Filled.Contrast,
                     label          = "Apariencia",
-                    selected       = quickAppearanceOn,
-                    pendingMessage = "Has seleccionado Apariencia. Toca dos veces para confirmar.",
+                    selected       = selectedTab == ConfigTab.APARIENCIA,
+                    pendingMessage = APARIENCIA_TAB_DESCRIPTION,
                     onConfirm      = {
-                        val activate = !quickAppearanceOn
-                        save(local.copy(highContrast = activate, largeFont = activate))
-                        voice.speak(
-                            if (activate) "Alto contraste y texto grande activados."
-                            else "Alto contraste y texto grande desactivados."
-                        )
+                        selectedTab = ConfigTab.APARIENCIA
+                        voice.speak(aparienciaAnnouncement(local))
                     },
                 ),
                 accentColor   = ConfigSlate,
@@ -219,206 +309,73 @@ fun ConfigScreen(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
 
-        LazyColumn(
-            state          = listState,
-            modifier       = Modifier
+        AnimatedContent(
+            targetState = selectedTab,
+            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-
-            // ── MODO DE INTERACCIÓN ────────────────────────────────────────
-            item {
-                SectionHeader(title = "Modo de interacción", icon = Icons.Filled.TouchApp)
-            }
-            item {
-                InteractionModeSelector(
-                    selected = local.interactionMode,
-                    onSelect = { mode ->
+            label = "configTab",
+        ) { tab ->
+            when (tab) {
+                ConfigTab.METODO -> MetodoTabContent(
+                    local = local,
+                    scrollState = metodoScroll,
+                    onModeSelect = { mode ->
                         save(local.copy(interactionMode = mode))
                         voice.speak(interactionModeChangedSpeech(mode))
                     },
-                )
-            }
-
-            // ── VOZ ────────────────────────────────────────────────────────
-            item { Spacer(Modifier.height(8.dp)) }
-            item {
-                SectionHeader(title = "Voz y anuncios", icon = Icons.Filled.RecordVoiceOver)
-            }
-            item {
-                PreferenceSwitch(
-                    label       = "Lectura por voz (TTS)",
-                    description = "Anuncia el nombre de cada botón al tocarlo.",
-                    checked     = local.ttsEnabled,
-                    onChecked   = { enabled ->
+                    onTtsToggle = { enabled ->
                         save(local.copy(ttsEnabled = enabled))
                         if (enabled) voice.speak("Lectura por voz activada.")
                     },
-                    icon        = Icons.Filled.RecordVoiceOver,
-                    iconDesc    = "Lectura por voz",
-                )
-            }
-            item {
-                VoiceSpeedSelector(
-                    selected = local.ttsSpeed,
-                    enabled  = local.ttsEnabled,
-                    onSelect = { speed ->
+                    onSpeedSelect = { speed ->
                         save(local.copy(ttsSpeed = speed))
-                        val label = when (speed) {
-                            TtsSpeed.SLOW   -> "Velocidad de voz: lenta."
-                            TtsSpeed.NORMAL -> "Velocidad de voz: normal."
-                            TtsSpeed.FAST   -> "Velocidad de voz: rápida."
-                        }
-                        voice.speak(label)
+                        voice.speak(
+                            when (speed) {
+                                TtsSpeed.SLOW   -> "Velocidad de voz: lenta."
+                                TtsSpeed.NORMAL -> "Velocidad de voz: normal."
+                                TtsSpeed.FAST   -> "Velocidad de voz: rápida."
+                            }
+                        )
                     },
                 )
-            }
-            // ── VIBRACIÓN ─────────────────────────────────────────────────
-            item { Spacer(Modifier.height(8.dp)) }
-            item {
-                SectionHeader(title = "Vibración háptica", icon = Icons.Filled.Vibration)
-            }
-            item {
-                PreferenceSwitch(
-                    label       = "Vibración háptica",
-                    description = "Pulso de vibración corto al tocar botones.",
-                    checked     = local.hapticEnabled,
-                    onChecked   = { enabled ->
+                ConfigTab.VIBRACION -> VibracionTabContent(
+                    local = local,
+                    scrollState = vibracionScroll,
+                    onHapticToggle = { enabled ->
                         save(local.copy(hapticEnabled = enabled))
                         if (local.ttsEnabled) {
-                            voice.speak(
-                                if (enabled) "Vibración activada." else "Vibración desactivada."
-                            )
+                            voice.speak(if (enabled) "Vibración activada." else "Vibración desactivada.")
                         }
                     },
-                    icon        = Icons.Filled.Vibration,
-                    iconDesc    = "Vibración háptica",
-                )
-            }
-            item {
-                VibrationIntensitySelector(
-                    selected = local.vibrationIntensity,
-                    enabled  = local.hapticEnabled,
-                    onSelect = { intensity ->
+                    onIntensitySelect = { intensity ->
                         save(local.copy(vibrationIntensity = intensity))
                         HapticHelper.vibrate(context, true, intensity)
-                        val label = when (intensity) {
-                            VibrationIntensity.SUAVE   -> "Intensidad de vibración: suave."
-                            VibrationIntensity.MEDIA   -> "Intensidad de vibración: media."
-                            VibrationIntensity.INTENSA -> "Intensidad de vibración: intensa."
-                        }
-                        voice.speak(label)
+                        voice.speak(
+                            when (intensity) {
+                                VibrationIntensity.SUAVE   -> "Intensidad de vibración: suave."
+                                VibrationIntensity.MEDIA   -> "Intensidad de vibración: media."
+                                VibrationIntensity.INTENSA -> "Intensidad de vibración: intensa."
+                            }
+                        )
                     },
                 )
-            }
-
-            // ── APARIENCIA ────────────────────────────────────────────────
-            item { Spacer(Modifier.height(8.dp)) }
-            item {
-                SectionHeader(title = "Apariencia", icon = Icons.Filled.Contrast)
-            }
-            item {
-                PreferenceSwitch(
-                    label       = "Alto contraste",
-                    description = "Texto negro puro sobre fondo blanco para mayor visibilidad.",
-                    checked     = local.highContrast,
-                    onChecked   = { enabled ->
+                ConfigTab.APARIENCIA -> AparienciaTabContent(
+                    local = local,
+                    scrollState = aparienciaScroll,
+                    resetConfirm = resetConfirm,
+                    onHighContrastToggle = { enabled ->
                         save(local.copy(highContrast = enabled))
-                        voice.speak(
-                            if (enabled) "Modo alto contraste activado." else "Modo alto contraste desactivado."
-                        )
+                        voice.speak(if (enabled) "Modo alto contraste activado." else "Modo alto contraste desactivado.")
                     },
-                    icon        = Icons.Filled.Contrast,
-                    iconDesc    = "Alto contraste",
-                )
-            }
-            item {
-                PreferenceSwitch(
-                    label       = "Texto grande",
-                    description = "Aumenta el tamaño del texto en toda la aplicación.",
-                    checked     = local.largeFont,
-                    onChecked   = { enabled ->
+                    onLargeFontToggle = { enabled ->
                         save(local.copy(largeFont = enabled))
-                        voice.speak(
-                            if (enabled) "Texto grande activado." else "Texto grande desactivado."
-                        )
+                        voice.speak(if (enabled) "Texto grande activado." else "Texto grande desactivado.")
                     },
-                    icon        = Icons.Filled.FormatSize,
-                    iconDesc    = "Texto grande",
                 )
             }
-
-            // ── RESTAURAR ─────────────────────────────────────────────────
-            item { Spacer(Modifier.height(16.dp)) }
-            item {
-                OutlinedButton(
-                    onClick  = { showResetDialog = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .semantics {
-                            contentDescription = "Restaurar configuración predeterminada"
-                        },
-                    shape  = RoundedCornerShape(18.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.error),
-                ) {
-                    Icon(
-                        imageVector        = Icons.Filled.RestartAlt,
-                        contentDescription = null,
-                        modifier           = Modifier.size(22.dp),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text       = "Restaurar configuración predeterminada",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize   = 15.sp,
-                    )
-                }
-            }
-
-            item { Spacer(Modifier.height(24.dp)) }
         }
-    }
-
-    // ── Reset confirmation dialog ──────────────────────────────────────────
-    if (showResetDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetDialog = false },
-            title = {
-                Text(
-                    text       = "Restaurar configuración",
-                    fontWeight = FontWeight.Bold,
-                )
-            },
-            text = {
-                Text("¿Deseas restablecer todas las preferencias a sus valores predeterminados?")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showResetDialog = false
-                        save(UserPreferences.Default)
-                        voice.speak("Configuración restaurada.")
-                    },
-                ) {
-                    Text(
-                        text  = "Restaurar",
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
-                    Text("Cancelar")
-                }
-            },
-        )
     }
 }
 
@@ -450,25 +407,195 @@ private fun SectionHeader(
     }
 }
 
+// ── Tab contents ────────────────────────────────────────────────────────────
+//
+// Cada pestaña muestra únicamente su propio contenido — nada de las otras 2
+// categorías. `verticalArrangement = Arrangement.spacedBy(.., CenterVertically)`
+// mantiene el contenido centrado dentro del área disponible cuando entra
+// completo, y sigue permitiendo scroll (vía el [ScrollState] recibido, con
+// vida en ConfigScreen) cuando no entra — sin saltos al cambiar de pestaña.
+
+@Composable
+private fun MetodoTabContent(
+    local: UserPreferences,
+    scrollState: ScrollState,
+    onModeSelect: (InteractionMode) -> Unit,
+    onTtsToggle: (Boolean) -> Unit,
+    onSpeedSelect: (TtsSpeed) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier            = modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+    ) {
+        SectionHeader(title = "Modo de interacción", icon = Icons.Filled.TouchApp)
+        InteractionModeSelector(selected = local.interactionMode, prefs = local, onSelect = onModeSelect)
+
+        Spacer(Modifier.height(8.dp))
+        SectionHeader(title = "Voz y anuncios", icon = Icons.Filled.RecordVoiceOver)
+        PreferenceSwitch(
+            label           = "Lectura por voz (TTS)",
+            description     = "Anuncia el nombre de cada botón al tocarlo.",
+            checked         = local.ttsEnabled,
+            prefs           = local,
+            onConfirmToggle = onTtsToggle,
+            icon            = Icons.Filled.RecordVoiceOver,
+            iconDesc        = "Lectura por voz",
+        )
+        VoiceSpeedSelector(selected = local.ttsSpeed, enabled = local.ttsEnabled, prefs = local, onSelect = onSpeedSelect)
+    }
+}
+
+@Composable
+private fun VibracionTabContent(
+    local: UserPreferences,
+    scrollState: ScrollState,
+    onHapticToggle: (Boolean) -> Unit,
+    onIntensitySelect: (VibrationIntensity) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier            = modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+    ) {
+        SectionHeader(title = "Vibración háptica", icon = Icons.Filled.Vibration)
+        PreferenceSwitch(
+            label           = "Vibración háptica",
+            description     = "Pulso de vibración corto al tocar botones.",
+            checked         = local.hapticEnabled,
+            prefs           = local,
+            onConfirmToggle = onHapticToggle,
+            icon            = Icons.Filled.Vibration,
+            iconDesc        = "Vibración háptica",
+        )
+        VibrationIntensitySelector(
+            selected = local.vibrationIntensity,
+            enabled  = local.hapticEnabled,
+            prefs    = local,
+            onSelect = onIntensitySelect,
+        )
+    }
+}
+
+@Composable
+private fun AparienciaTabContent(
+    local: UserPreferences,
+    scrollState: ScrollState,
+    resetConfirm: ConfirmActionState,
+    onHighContrastToggle: (Boolean) -> Unit,
+    onLargeFontToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier            = modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+    ) {
+        SectionHeader(title = "Apariencia", icon = Icons.Filled.Contrast)
+        PreferenceSwitch(
+            label           = "Alto contraste",
+            description     = "Texto negro puro sobre fondo blanco para mayor visibilidad.",
+            checked         = local.highContrast,
+            prefs           = local,
+            onConfirmToggle = onHighContrastToggle,
+            icon            = Icons.Filled.Contrast,
+            iconDesc        = "Alto contraste",
+        )
+        PreferenceSwitch(
+            label           = "Texto grande",
+            description     = "Aumenta el tamaño del texto en toda la aplicación.",
+            checked         = local.largeFont,
+            prefs           = local,
+            onConfirmToggle = onLargeFontToggle,
+            icon            = Icons.Filled.FormatSize,
+            iconDesc        = "Texto grande",
+        )
+
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick  = resetConfirm::onTap,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(75.dp)
+                .semantics {
+                    contentDescription = if (resetConfirm.isPending)
+                        "Confirmar restauración. Toca de nuevo para restaurar los valores predeterminados."
+                    else
+                        "Restaurar configuración predeterminada. Toca dos veces para confirmar."
+                },
+            shape  = RoundedCornerShape(18.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.error,
+            ),
+            border = BorderStroke(
+                width = if (resetConfirm.isPending) 2.5.dp else 2.dp,
+                color = MaterialTheme.colorScheme.error.copy(alpha = if (resetConfirm.isPending) 1f else 0.65f),
+            ),
+        ) {
+            Icon(
+                imageVector        = Icons.Filled.RestartAlt,
+                contentDescription = null,
+                modifier           = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text       = if (resetConfirm.isPending) "Confirmar restauración" else "Restaurar configuración predeterminada",
+                fontWeight = FontWeight.SemiBold,
+                fontSize   = 15.sp,
+            )
+        }
+    }
+}
+
 // ── Preference row with Switch ─────────────────────────────────────────────
+//
+// Mismo patrón de doble toque que el resto de la pantalla: el primer toque
+// arma (vibra + anuncia qué hace y hacia dónde cambiará), el segundo confirma
+// y recién ahí llama a [onConfirmToggle] con el nuevo valor. El Switch queda
+// como indicador visual puro (`onCheckedChange = null`): toda la tarjeta es
+// el único punto de interacción, evitando un segundo camino de activación.
 
 @Composable
 private fun PreferenceSwitch(
     label: String,
     description: String,
     checked: Boolean,
-    onChecked: (Boolean) -> Unit,
+    prefs: UserPreferences,
+    onConfirmToggle: (Boolean) -> Unit,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     iconDesc: String,
 ) {
+    val context = LocalContext.current
+    val voice = LocalVoiceInteractionManager.current
+    val confirm = rememberConfirmAction(
+        pendingMessage = "$label. $description Toca dos veces para ${if (checked) "desactivar" else "activar"}.",
+        onSpeak  = voice::speak,
+        onHaptic = { HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity) },
+        onConfirm = { onConfirmToggle(!checked) },
+    )
     Card(
         modifier  = Modifier
             .fillMaxWidth()
-            .semantics { contentDescription = "$label: ${if (checked) "activado" else "desactivado"}" },
+            .semantics {
+                contentDescription = if (confirm.isPending)
+                    "Confirmar: $label. Toca de nuevo."
+                else
+                    "$label: ${if (checked) "activado" else "desactivado"}. Toca dos veces para cambiar."
+            },
         shape     = RoundedCornerShape(16.dp),
-        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors    = CardDefaults.cardColors(
+            containerColor = if (confirm.isPending) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        onClick   = { onChecked(!checked) },
+        onClick   = confirm::onTap,
     ) {
         Row(
             modifier          = Modifier
@@ -498,7 +625,7 @@ private fun PreferenceSwitch(
             }
             Switch(
                 checked         = checked,
-                onCheckedChange = onChecked,
+                onCheckedChange = null,
             )
         }
     }
@@ -509,6 +636,7 @@ private fun PreferenceSwitch(
 @Composable
 private fun InteractionModeSelector(
     selected: InteractionMode,
+    prefs: UserPreferences,
     onSelect: (InteractionMode) -> Unit,
 ) {
     Row(
@@ -516,20 +644,22 @@ private fun InteractionModeSelector(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         InteractionModeButton(
-            label       = "Doble toque",
-            description = "Dos toques consecutivos para activar",
-            icon        = Icons.Filled.TouchApp,
-            isSelected  = selected == InteractionMode.DOUBLE_TAP,
-            onClick     = { onSelect(InteractionMode.DOUBLE_TAP) },
-            modifier    = Modifier.weight(1f),
+            label           = "Doble toque",
+            description     = "Dos toques consecutivos para activar",
+            icon            = Icons.Filled.TouchApp,
+            isSelected      = selected == InteractionMode.DOUBLE_TAP,
+            prefs           = prefs,
+            onConfirmSelect = { onSelect(InteractionMode.DOUBLE_TAP) },
+            modifier        = Modifier.weight(1f),
         )
         InteractionModeButton(
-            label       = "Pulsación prolongada",
-            description = "Mantener 2 segundos para activar",
-            icon        = Icons.Filled.Timer,
-            isSelected  = selected == InteractionMode.LONG_PRESS,
-            onClick     = { onSelect(InteractionMode.LONG_PRESS) },
-            modifier    = Modifier.weight(1f),
+            label           = "Pulsación prolongada",
+            description     = "Mantener 2 segundos para activar",
+            icon            = Icons.Filled.Timer,
+            isSelected      = selected == InteractionMode.LONG_PRESS,
+            prefs           = prefs,
+            onConfirmSelect = { onSelect(InteractionMode.LONG_PRESS) },
+            modifier        = Modifier.weight(1f),
         )
     }
 }
@@ -540,15 +670,25 @@ private fun InteractionModeButton(
     description: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     isSelected: Boolean,
-    onClick: () -> Unit,
+    prefs: UserPreferences,
+    onConfirmSelect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val borderColor = if (isSelected)
+    val context = LocalContext.current
+    val voice = LocalVoiceInteractionManager.current
+    val confirm = rememberConfirmAction(
+        pendingMessage = "$label. $description. Toca dos veces para confirmar.",
+        onSpeak  = voice::speak,
+        onHaptic = { HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity) },
+        onConfirm = onConfirmSelect,
+    )
+
+    val borderColor = if (confirm.isPending || isSelected)
         MaterialTheme.colorScheme.primary
     else
         MaterialTheme.colorScheme.surfaceVariant
 
-    val bgColor = if (isSelected)
+    val bgColor = if (confirm.isPending || isSelected)
         MaterialTheme.colorScheme.primaryContainer
     else
         MaterialTheme.colorScheme.surface
@@ -559,10 +699,13 @@ private fun InteractionModeButton(
             .clip(RoundedCornerShape(16.dp))
             .background(bgColor)
             .border(2.dp, borderColor, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .clickable(onClick = confirm::onTap)
             .padding(16.dp)
             .semantics {
-                contentDescription = "$label: ${if (isSelected) "seleccionado" else "no seleccionado"}"
+                contentDescription = if (confirm.isPending)
+                    "Confirmar: $label. Toca de nuevo."
+                else
+                    "$label: ${if (isSelected) "seleccionado" else "no seleccionado"}. Toca dos veces para seleccionar."
             },
     ) {
         Icon(
@@ -595,6 +738,7 @@ private fun InteractionModeButton(
 private fun VoiceSpeedSelector(
     selected: TtsSpeed,
     enabled: Boolean,
+    prefs: UserPreferences,
     onSelect: (TtsSpeed) -> Unit,
 ) {
     Card(
@@ -632,11 +776,13 @@ private fun VoiceSpeedSelector(
                     TtsSpeed.FAST   to "Rápida",
                 ).forEach { (speed, label) ->
                     SpeedChip(
-                        label      = label,
-                        isSelected = selected == speed,
-                        enabled    = enabled,
-                        onClick    = { if (enabled) onSelect(speed) },
-                        modifier   = Modifier.weight(1f),
+                        label           = label,
+                        isSelected      = selected == speed,
+                        enabled         = enabled,
+                        pendingMessage  = "Velocidad de voz: $label. Toca dos veces para confirmar.",
+                        prefs           = prefs,
+                        onConfirmSelect = { onSelect(speed) },
+                        modifier        = Modifier.weight(1f),
                     )
                 }
             }
@@ -649,18 +795,28 @@ private fun SpeedChip(
     label: String,
     isSelected: Boolean,
     enabled: Boolean,
-    onClick: () -> Unit,
+    pendingMessage: String,
+    prefs: UserPreferences,
+    onConfirmSelect: () -> Unit,
     modifier: Modifier = Modifier,
     semanticsPrefix: String = "Velocidad",
 ) {
+    val context = LocalContext.current
+    val voice = LocalVoiceInteractionManager.current
+    val confirm = rememberConfirmAction(
+        pendingMessage = pendingMessage,
+        onSpeak  = voice::speak,
+        onHaptic = { HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity) },
+        onConfirm = onConfirmSelect,
+    )
+
+    val highlighted = (isSelected || confirm.isPending) && enabled
     val bg = when {
-        isSelected && enabled -> MaterialTheme.colorScheme.primary
-        else                  -> MaterialTheme.colorScheme.surfaceVariant
+        confirm.isPending && enabled -> MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+        isSelected && enabled        -> MaterialTheme.colorScheme.primary
+        else                         -> MaterialTheme.colorScheme.surfaceVariant
     }
-    val textColor = when {
-        isSelected && enabled -> MaterialTheme.colorScheme.onPrimary
-        else                  -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val textColor = if (highlighted) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
 
     Box(
         contentAlignment = Alignment.Center,
@@ -668,13 +824,21 @@ private fun SpeedChip(
             .height(44.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = "$semanticsPrefix $label${if (isSelected) ", seleccionada" else ""}" }
+            .clickable(enabled = enabled, onClick = confirm::onTap)
+            .semantics {
+                contentDescription = buildString {
+                    append(semanticsPrefix)
+                    append(" ")
+                    append(label)
+                    if (isSelected) append(", seleccionada")
+                    if (confirm.isPending) append(". Toca de nuevo para confirmar.")
+                }
+            }
             .padding(horizontal = 8.dp),
     ) {
         Text(
             text       = label,
-            fontWeight = if (isSelected && enabled) FontWeight.Bold else FontWeight.Normal,
+            fontWeight = if (highlighted) FontWeight.Bold else FontWeight.Normal,
             fontSize   = 14.sp,
             color      = textColor,
         )
@@ -687,6 +851,7 @@ private fun SpeedChip(
 private fun VibrationIntensitySelector(
     selected: VibrationIntensity,
     enabled: Boolean,
+    prefs: UserPreferences,
     onSelect: (VibrationIntensity) -> Unit,
 ) {
     Card(
@@ -727,7 +892,9 @@ private fun VibrationIntensitySelector(
                         label           = label,
                         isSelected      = selected == intensity,
                         enabled         = enabled,
-                        onClick         = { if (enabled) onSelect(intensity) },
+                        pendingMessage  = "Intensidad de vibración: $label. Toca dos veces para confirmar.",
+                        prefs           = prefs,
+                        onConfirmSelect = { onSelect(intensity) },
                         modifier        = Modifier.weight(1f),
                         semanticsPrefix = "Intensidad",
                     )

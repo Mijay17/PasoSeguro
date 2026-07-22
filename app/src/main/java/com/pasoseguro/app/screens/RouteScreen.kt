@@ -61,6 +61,7 @@ import com.pasoseguro.app.ui.theme.ContactGreen50
 import com.pasoseguro.app.ui.theme.NavBlue
 import com.pasoseguro.app.ui.theme.RouteAmber
 import com.pasoseguro.app.ui.theme.RouteAmberLight
+import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.LOCATION_PERMISSIONS
 import com.pasoseguro.app.utils.hasLocationPermission
 import com.pasoseguro.app.voice.ScreenVoiceCommand
@@ -193,6 +194,7 @@ fun RouteScreen(navController: NavController) {
             locationPermissionLauncher.launch(LOCATION_PERMISSIONS)
             return
         }
+        HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
         val loc = uiState.userLocation
         if (loc != null) {
             scope.launch { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(loc, 16f), 600) }
@@ -217,6 +219,7 @@ fun RouteScreen(navController: NavController) {
             navController.popBackStack()
         } else {
             homePendingConfirm = true
+            HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
             vm.speakHomePrompt()
         }
     }
@@ -945,9 +948,13 @@ private fun BottomRouteActionBar(
                         modifier = Modifier
                             .size(68.dp * scale)
                             .shadow(if (homePendingConfirm) 6.dp else 3.dp, CircleShape)
-                            .background(
-                                if (homePendingConfirm) RouteAmber.copy(alpha = 0.75f) else RouteAmber,
-                                CircleShape,
+                            // Fondo SIEMPRE blanco — solo el borde indica el estado
+                            // seleccionado, para que el logotipo nunca pierda contraste.
+                            .background(Color.White, CircleShape)
+                            .border(
+                                width = if (homePendingConfirm) 3.dp else 1.5.dp,
+                                color = RouteAmber,
+                                shape = CircleShape,
                             )
                             .clickable(onClick = onHomeTap)
                             .semantics {

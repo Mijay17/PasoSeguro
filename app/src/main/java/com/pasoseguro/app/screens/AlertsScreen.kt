@@ -31,6 +31,7 @@ import androidx.navigation.NavController
 import com.pasoseguro.app.components.AssistantMicButton
 import com.pasoseguro.app.components.BarAction
 import com.pasoseguro.app.components.ProceduralBottomBar
+import com.pasoseguro.app.navigation.Feature
 import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.ui.theme.*
@@ -87,6 +88,10 @@ fun AlertsScreen(navController: NavController) {
                 ),
             ),
             helpHint = "En esta pantalla puedes decir: Leer notificaciones, o Última alerta.",
+            // Mientras se explica esta pantalla (historial de Navegar + Explorar), esas
+            // dos palabras no deben disparar un cambio de pantalla accidental. El resto
+            // de comandos globales (Inicio/Atrás/Ayuda/Cancelar/Repetir) sigue igual.
+            disabledFeatures = setOf(Feature.NAVIGATE, Feature.SCAN),
         )
     }
     val activeVoice = rememberAutoListenVoice(alertsVoiceContext)
@@ -110,6 +115,7 @@ fun AlertsScreen(navController: NavController) {
                 voiceState    = voiceState,
                 onMicClick    = voice::requestHelp,
                 onBackClick   = {
+                    HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
                     voice.speak("Volviendo a la pantalla principal")
                     navController.popBackStack()
                 },

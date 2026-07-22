@@ -125,7 +125,13 @@ fun ContactsScreen(navController: NavController) {
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    IconButton(
+                        onClick = {
+                            HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
+                            voice.speak("Volviendo a la pantalla principal")
+                            navController.popBackStack()
+                        },
+                    ) {
                         Icon(
                             imageVector        = Icons.Filled.ArrowBackIosNew,
                             contentDescription = "Volver al inicio",

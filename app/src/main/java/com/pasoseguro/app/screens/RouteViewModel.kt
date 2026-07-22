@@ -11,6 +11,7 @@ import com.pasoseguro.app.routing.LocationDistanceHelper
 import com.pasoseguro.app.routing.NavigationSimulationEngine
 import com.pasoseguro.app.routing.RouteSimulationEngine
 import com.pasoseguro.app.routing.SimulationSpeed
+import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.NonRepeatingPicker
 import com.pasoseguro.app.utils.fetchLastLocation
 import com.pasoseguro.app.utils.hasLocationPermission
@@ -195,12 +196,18 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
 
     // ── Navigation within the app ─────────────────────────────────────────
 
+    /** Pulso háptico previo a cualquier confirmación hablada — ver [HapticHelper]. */
+    private fun vibrate() {
+        if (hapticEnabled) HapticHelper.vibrate(appContext, true, vibrationIntensity)
+    }
+
     fun onSearchQueryChange(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
     }
 
     fun showSavedDestinations() {
         _uiState.update { it.copy(phase = RoutePhase.SAVED, destPendingConfirm = null) }
+        vibrate()
         voice.speak("Mis destinos guardados. Toca un destino para seleccionarlo.")
     }
 
@@ -247,6 +254,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
         } else {
             // First tap — announce and arm
             _uiState.update { it.copy(destPendingConfirm = dest) }
+            vibrate()
             voice.speak("Destino seleccionado: ${dest.name}. Toca dos veces para calcular el trayecto.")
             viewModelScope.launch {
                 delay(3_000L)
@@ -273,6 +281,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
             startSimulatedNavigation()
         } else {
             _uiState.update { it.copy(startPendingConfirm = true) }
+            vibrate()
             voice.speak("Has seleccionado iniciar la navegación. Toca dos veces para comenzar.")
             viewModelScope.launch {
                 delay(3_000L)
@@ -299,6 +308,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
             }
         } else {
             _uiState.update { it.copy(navCancelPendingConfirm = true) }
+            vibrate()
             voice.speak("La navegación será cancelada. Toca dos veces para confirmar.")
             viewModelScope.launch {
                 delay(3_000L)
@@ -319,6 +329,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
         _uiState.update {
             RouteUiState(userLocation = it.userLocation, favoriteDestinations = it.favoriteDestinations)
         }
+        vibrate()
         viewModelScope.launch {
             delay(200L)
             voice.speak("Indica tu destino.")
@@ -381,10 +392,10 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
                             navArrived = frame.arrived,
                         )
                     }
-                    voice.speak(frame.instruction)
                     if (hapticEnabled) {
                         vibratePattern(appContext, if (frame.arrived) VibPattern.ONE else VibPattern.TWO, vibrationIntensity)
                     }
+                    voice.speak(frame.instruction)
                     if (frame.arrived) {
                         delay(300L)
                         voice.speak(navArrivalMessages.next())

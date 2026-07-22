@@ -94,7 +94,7 @@ object CommandProcessor {
             if (matchesAny(tokens, entry.keywords, strict)) return Resolution.Screen(entry)
         }
 
-        matchGlobal(tokens, strict)?.let { return Resolution.Global(it) }
+        matchGlobal(tokens, strict, screen?.disabledFeatures ?: emptySet())?.let { return Resolution.Global(it) }
 
         return Resolution.Unresolved(rawText)
     }
@@ -127,8 +127,9 @@ object CommandProcessor {
     private fun tokensSimilar(a: String, b: String): Boolean =
         a == b || a.startsWith(b) || b.startsWith(a)
 
-    private fun matchGlobal(tokens: List<String>, strict: Boolean): VoiceCommand? {
+    private fun matchGlobal(tokens: List<String>, strict: Boolean, disabledFeatures: Set<Feature>): VoiceCommand? {
         OPEN_FEATURE_KEYWORDS.forEach { (feature, keywords) ->
+            if (feature in disabledFeatures) return@forEach
             if (matchesAny(tokens, keywords, strict)) return VoiceCommand.OpenFeature(feature)
         }
         GLOBAL_COMMAND_KEYWORDS.forEach { (command, keywords) ->

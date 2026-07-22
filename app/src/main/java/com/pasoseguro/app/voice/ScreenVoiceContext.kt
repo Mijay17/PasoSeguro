@@ -1,5 +1,7 @@
 package com.pasoseguro.app.voice
 
+import com.pasoseguro.app.navigation.Feature
+
 /**
  * Un comando de voz propio de una pantalla — el punto de extensión por el
  * cual cada pantalla "registra automáticamente qué comandos acepta" sin que
@@ -35,4 +37,10 @@ data class ScreenVoiceContext(
     val helpHint: String? = null,
     val onActive: () -> Unit = {},
     val onInactive: () -> Unit = {},
+    // Comandos globales "abrir función" que esta pantalla desactiva mientras está
+    // activa (p. ej. Notificaciones bloquea Navegar/Explorar durante una demo, para
+    // que esas palabras no disparen un cambio de pantalla accidental). El resto de
+    // los comandos globales (Inicio/Atrás/Ayuda/Cancelar/Repetir) nunca se ven
+    // afectados — ver [CommandProcessor.matchGlobal].
+    val disabledFeatures: Set<Feature> = emptySet(),
 )
