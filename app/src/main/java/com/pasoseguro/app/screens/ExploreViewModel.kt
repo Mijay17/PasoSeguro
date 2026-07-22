@@ -2,26 +2,18 @@ package com.pasoseguro.app.screens
 
 import android.app.Application
 import android.content.Context
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.pasoseguro.app.data.TtsSpeed
+import com.pasoseguro.app.data.VibrationIntensity
+import com.pasoseguro.app.utils.HapticHelper
+import com.pasoseguro.app.voice.VoiceInteractionManager
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
-import java.util.Locale
 import kotlin.random.Random
 
 // ── Domain models ──────────────────────────────────────────────────────────
@@ -39,8 +31,10 @@ internal data class ExploreZoneDetail(
 // ── Simulated environment data ─────────────────────────────────────────────
 // TODO: Replace with real ImageAnalysis + object-detection model output
 
+// Sin "Explorar"/"exploración": el micrófono se arma casi al mismo tiempo
+// que este mensaje suena (ver VoiceCommand.kt).
 private const val WELCOME_TEXT =
-    "Bienvenido al modo Explorar. Gira lentamente para analizar el espacio que te rodea."
+    "Modo activado. Gira lentamente para analizar el espacio que te rodea."
 
 // Full environment description spoken and displayed after analysis completes
 internal const val ENVIRONMENT_DISPLAY =
@@ -103,83 +97,30 @@ internal data class ExploreUiState(
     val zoneDetail: ExploreZoneDetail? = null,
 )
 
-// ── TTS helper (UtteranceProgressListener + Channel, same as NavigateScreen) ──
-
-private class ExploreTtsHelper(context: Context) {
-
-    private var tts: TextToSpeech? = null
-    @Volatile private var ready = false
-
-    var enabled: Boolean  = true
-    var speechRate: Float = TtsSpeed.NORMAL.rate
-
-    private val doneChannel = Channel<Unit>(Channel.CONFLATED)
-
-    // Serializa speakAndAwait: la exploración automática y las respuestas del
-    // Asistente IA por voz ahora pueden llamarlo al mismo tiempo — sin este
-    // mutex, una cortaría a la otra (ambas usan QUEUE_FLUSH).
-    private val speechMutex = Mutex()
-
-    init {
-        tts = TextToSpeech(context.applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("es", "PE")
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) = Unit
-                    override fun onDone(utteranceId: String?)  { doneChannel.trySend(Unit) }
-                    @Suppress("DEPRECATION")
-                    override fun onError(utteranceId: String?) { doneChannel.trySend(Unit) }
-                    override fun onError(utteranceId: String?, errorCode: Int) { doneChannel.trySend(Unit) }
-                })
-                ready = true
-            }
-        }
-    }
-
-    suspend fun speakAndAwait(text: String, fallbackMs: Long = 4000L) = speechMutex.withLock {
-        if (!enabled || !ready) { delay(fallbackMs); return@withLock }
-        doneChannel.tryReceive()
-        tts?.setSpeechRate(speechRate)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID)
-        withTimeoutOrNull(30_000L) { doneChannel.receive() }
-        Unit
-    }
-
-    fun speak(text: String) {
-        if (!ready) return
-        tts?.setSpeechRate(speechRate)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_PROMPT)
-    }
-
-    fun setSpeed(speed: TtsSpeed) { speechRate = speed.rate }
-    fun shutdown() { tts?.stop(); tts?.shutdown(); tts = null }
-
-    companion object {
-        private const val UTTERANCE_ID     = "explore-main"
-        private const val UTTERANCE_PROMPT = "explore-prompt"
-    }
-}
-
 // ── ViewModel ──────────────────────────────────────────────────────────────
 
 internal class ExploreViewModel(application: Application) : AndroidViewModel(application) {
 
     private val appContext: Context = application.applicationContext
-    private val ttsHelper           = ExploreTtsHelper(appContext)
+
+    // Único motor de voz de toda la app — ver misma nota en NavigateViewModel.
+    private val voice = VoiceInteractionManager.getInstance(appContext)
 
     private val _uiState = MutableStateFlow(ExploreUiState())
     val uiState: StateFlow<ExploreUiState> = _uiState.asStateFlow()
 
-    // Emite cada vez que el Asistente IA termina de hablar una indicación —
-    // ExploreScreen lo usa para abrir una breve ventana de escucha por voz
-    // (sin botón) sin acoplar el reconocimiento a esta ViewModel.
-    private val _speechFinished = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val speechFinished: SharedFlow<Unit> = _speechFinished.asSharedFlow()
-
     private var activeJob: Job? = null
+    private var wasBackgrounded = false
+    private var hapticEnabled = true
+    private var vibrationIntensity = VibrationIntensity.MEDIA
 
     init {
         startExploration()
+    }
+
+    /** Pulso háptico previo a cualquier confirmación hablada — ver [HapticHelper]. */
+    private fun vibrate() {
+        if (hapticEnabled) HapticHelper.vibrate(appContext, true, vibrationIntensity)
     }
 
     // ── Exploration flow ───────────────────────────────────────────────────
@@ -199,20 +140,21 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
         _uiState.update { ExploreUiState(phase = ExplorePhase.STARTING) }
         activeJob = viewModelScope.launch {
             delay(300L)
-            ttsHelper.speakAndAwait(WELCOME_TEXT)
-            _speechFinished.tryEmit(Unit)
+            // flush=false en toda la secuencia: la primera evita cortar la
+            // confirmación de navegación que puede seguir sonando al entrar;
+            // las siguientes ya se esperan una a una, así que no cambia nada
+            // para ellas — se mantiene por consistencia de la secuencia.
+            voice.speakAndAwait(WELCOME_TEXT, flush = false)
 
             _uiState.update { it.copy(phase = ExplorePhase.ANALYZING) }
             delay(Random.nextLong(5_000L, 8_001L))  // TODO: replace with real analysis time
 
             _uiState.update { it.copy(phase = ExplorePhase.COMPLETE) }
-            ttsHelper.speakAndAwait(ENVIRONMENT_SPEAK)
-            _speechFinished.tryEmit(Unit)
+            voice.speakAndAwait(ENVIRONMENT_SPEAK, flush = false)
 
             delay(600L)
             _uiState.update { it.copy(phase = ExplorePhase.READY) }
-            ttsHelper.speakAndAwait(FOLLOWUP_QUESTION)
-            _speechFinished.tryEmit(Unit)
+            voice.speakAndAwait(FOLLOWUP_QUESTION, flush = false)
         }
     }
 
@@ -232,25 +174,28 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
         val detail = ZONE_DETAILS[zone]?.random() ?: return
         activeJob?.cancel()
         _uiState.update { it.copy(activeZone = zone, zoneDetail = detail) }
+        vibrate()
         activeJob = viewModelScope.launch {
-            ttsHelper.speakAndAwait(detail.speakText)
-            _speechFinished.tryEmit(Unit)
+            voice.speakAndAwait(detail.speakText)
             delay(1_000L)
             _uiState.update { it.copy(activeZone = null, zoneDetail = null) }
-            ttsHelper.speak(FOLLOWUP_QUESTION)
+            voice.speak(FOLLOWUP_QUESTION)
         }
     }
 
-    /** Para el Asistente IA por voz: habla [text] y solo al terminar ejecuta [onDone]. */
-    fun speakThenRun(text: String, onDone: () -> Unit) {
-        viewModelScope.launch {
-            ttsHelper.speakAndAwait(text)
-            onDone()
-        }
-    }
-
-    /** Restarts the full exploration from scratch. */
+    /** Restarts the full exploration from scratch — comando de voz "Explorar nuevamente". */
     fun restartExploration() { startExploration() }
+
+    /**
+     * Re-habla la descripción del entorno ya analizado sin repetir el loop
+     * STARTING→ANALYZING — comando de voz "Describir entorno". No hace nada
+     * si la exploración todavía no llegó a COMPLETE/READY (nada que describir).
+     */
+    fun describeEnvironmentAgain() {
+        if (_uiState.value.phase != ExplorePhase.COMPLETE && _uiState.value.phase != ExplorePhase.READY) return
+        activeJob?.cancel()
+        activeJob = viewModelScope.launch { voice.speakAndAwait(ENVIRONMENT_SPEAK) }
+    }
 
     /**
      * Halts any running TTS and speaks the exit confirmation prompt.
@@ -259,7 +204,34 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
     fun stopExplorationForConfirm() {
         activeJob?.cancel()
         activeJob = null
-        ttsHelper.speak("¿Desea volver al inicio? Presione dos veces para confirmar.")
+        vibrate()
+        // Sin "inicio": el micrófono sigue escuchando mientras esta frase suena
+        // y "inicio" es palabra gatillo del comando global Inicio.
+        voice.speak("¿Deseas salir de este modo? Presiona dos veces para confirmar.")
+    }
+
+    /**
+     * Pausa silenciosa al dejar de ser la pantalla activa (navegación a otra
+     * pantalla, sin destruir este ViewModel) — a diferencia de
+     * [stopExplorationForConfirm], no habla ningún mensaje. Idempotente.
+     */
+    fun pauseExploration() {
+        if (wasBackgrounded) return
+        wasBackgrounded = true
+        activeJob?.cancel()
+        activeJob = null
+        voice.stopSpeaking()
+    }
+
+    /**
+     * Reanuda tras [pauseExploration] — no-op si nunca se pausó (evita forzar
+     * la fase a READY en la primera entrada, que es lo que hace
+     * [resumeExploration] incondicionalmente).
+     */
+    fun resumeIfBackgrounded() {
+        if (!wasBackgrounded) return
+        wasBackgrounded = false
+        resumeExploration()
     }
 
     /**
@@ -269,25 +241,25 @@ internal class ExploreViewModel(application: Application) : AndroidViewModel(app
     fun resumeExploration() {
         val phase = _uiState.value.phase
         if (phase == ExplorePhase.READY) {
-            ttsHelper.speak("Continuando modo exploración.")
+            voice.speak("Continuando modo exploración.")
             return
         }
         // If interrupted during ANALYZING or COMPLETE, skip to READY
         _uiState.update { it.copy(phase = ExplorePhase.READY, activeZone = null, zoneDetail = null) }
         activeJob = viewModelScope.launch {
-            ttsHelper.speak("Exploración lista. Puedes explorar las zonas.")
+            voice.speak("Exploración lista. Puedes explorar las zonas.")
         }
     }
 
-    fun updateTtsSettings(enabled: Boolean, speed: TtsSpeed) {
-        ttsHelper.enabled = enabled
-        ttsHelper.setSpeed(speed)
+    fun updateHapticEnabled(enabled: Boolean) {
+        hapticEnabled = enabled
     }
 
-    fun updateHapticEnabled(enabled: Boolean) { /* reserved */ }
+    fun updateVibrationIntensity(intensity: VibrationIntensity) {
+        vibrationIntensity = intensity
+    }
 
     override fun onCleared() {
         activeJob?.cancel()
-        ttsHelper.shutdown()
     }
 }

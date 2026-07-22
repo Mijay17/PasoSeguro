@@ -2,22 +2,20 @@ package com.pasoseguro.app.screens
 
 import android.app.Application
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.maps.model.LatLng
 import com.pasoseguro.app.components.LimaCityCenter
-import com.pasoseguro.app.data.TtsSpeed
+import com.pasoseguro.app.data.VibrationIntensity
 import com.pasoseguro.app.routing.LocationDistanceHelper
 import com.pasoseguro.app.routing.NavigationSimulationEngine
 import com.pasoseguro.app.routing.RouteSimulationEngine
 import com.pasoseguro.app.routing.SimulationSpeed
+import com.pasoseguro.app.utils.HapticHelper
 import com.pasoseguro.app.utils.NonRepeatingPicker
 import com.pasoseguro.app.utils.fetchLastLocation
 import com.pasoseguro.app.utils.hasLocationPermission
+import com.pasoseguro.app.voice.VoiceInteractionManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,8 +24,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.Locale
-import java.util.concurrent.atomic.AtomicInteger
 
 // ── Phases ─────────────────────────────────────────────────────────────────
 
@@ -140,13 +136,17 @@ internal data class RouteUiState(
 internal class RouteViewModel(application: Application) : AndroidViewModel(application) {
 
     private val appContext: Context = application.applicationContext
-    private val tts = RouteTtsHelper(appContext)
+
+    // Único motor de voz de toda la app — ver misma nota en NavigateViewModel.
+    private val voice = VoiceInteractionManager.getInstance(appContext)
 
     private val _uiState = MutableStateFlow(RouteUiState())
     val uiState: StateFlow<RouteUiState> = _uiState.asStateFlow()
 
     private var navJob: Job? = null
     private var hapticEnabled = true
+    private var vibrationIntensity = VibrationIntensity.MEDIA
+    private var navPaused = false
     private val navigationEngine = NavigationSimulationEngine()
 
     // Velocidad de la navegación simulada — constante por ahora (facilita
@@ -184,11 +184,22 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
     init {
         viewModelScope.launch {
             delay(500L)
-            tts.speak("Bienvenido al modo Ruta. Puedes seleccionar un destino favorito o indicarlo mediante un comando de voz.")
+            // Sin "Ruta": el micrófono se arma casi al mismo tiempo que este
+            // mensaje suena (ver VoiceCommand.kt). flush=false: no cortar la
+            // confirmación de navegación que puede seguir sonando al entrar.
+            voice.speak(
+                "Modo activado. Puedes seleccionar un destino favorito o indicarlo mediante un comando de voz.",
+                flush = false,
+            )
         }
     }
 
     // ── Navigation within the app ─────────────────────────────────────────
+
+    /** Pulso háptico previo a cualquier confirmación hablada — ver [HapticHelper]. */
+    private fun vibrate() {
+        if (hapticEnabled) HapticHelper.vibrate(appContext, true, vibrationIntensity)
+    }
 
     fun onSearchQueryChange(query: String) {
         _uiState.update { it.copy(searchQuery = query) }
@@ -196,7 +207,8 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
 
     fun showSavedDestinations() {
         _uiState.update { it.copy(phase = RoutePhase.SAVED, destPendingConfirm = null) }
-        tts.speak("Mis destinos guardados. Toca un destino para seleccionarlo.")
+        vibrate()
+        voice.speak("Mis destinos guardados. Toca un destino para seleccionarlo.")
     }
 
     // Two-tap destination selection — permanece en el mapa (fase SEARCH):
@@ -225,7 +237,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
                     navCancelPendingConfirm = false,
                 )
             }
-            tts.speak(calculatingMessages.next())
+            voice.speak(calculatingMessages.next())
             viewModelScope.launch {
                 delay((2_000L..3_000L).random())
                 val info = buildRouteInfo(dest)
@@ -242,7 +254,8 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
         } else {
             // First tap — announce and arm
             _uiState.update { it.copy(destPendingConfirm = dest) }
-            tts.speak("Destino seleccionado: ${dest.name}. Presiona nuevamente para calcular la ruta.")
+            vibrate()
+            voice.speak("Destino seleccionado: ${dest.name}. Toca dos veces para calcular el trayecto.")
             viewModelScope.launch {
                 delay(3_000L)
                 if (_uiState.value.destPendingConfirm?.id == dest.id) {
@@ -256,7 +269,7 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
     // trayecto y la polilínea terminó su animación de dibujado — es el paso
     // final de la secuencia: cámara -> polilínea -> tarjeta -> Asistente IA.
     fun announceRouteReady() {
-        tts.speak(routeReadyMessages.next())
+        voice.speak(routeReadyMessages.next())
     }
 
     // Two-tap "Iniciar ruta" button — el segundo toque arranca la navegación
@@ -264,11 +277,12 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
     fun onStartRouteTap() {
         if (_uiState.value.startPendingConfirm) {
             _uiState.update { it.copy(startPendingConfirm = false, routeStarted = true) }
-            tts.speak(navStartMessages.next())
+            voice.speak(navStartMessages.next())
             startSimulatedNavigation()
         } else {
             _uiState.update { it.copy(startPendingConfirm = true) }
-            tts.speak("Has seleccionado iniciar la navegación. Presiona nuevamente para comenzar.")
+            vibrate()
+            voice.speak("Has seleccionado iniciar la navegación. Toca dos veces para comenzar.")
             viewModelScope.launch {
                 delay(3_000L)
                 if (_uiState.value.startPendingConfirm) {
@@ -290,11 +304,12 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
             }
             viewModelScope.launch {
                 delay(200L)
-                tts.speak("Navegación cancelada. Modo Ruta. Indica tu destino.")
+                voice.speak("Navegación cancelada. Indica tu destino.")
             }
         } else {
             _uiState.update { it.copy(navCancelPendingConfirm = true) }
-            tts.speak("La navegación será cancelada. Presiona nuevamente para confirmar.")
+            vibrate()
+            voice.speak("La navegación será cancelada. Toca dos veces para confirmar.")
             viewModelScope.launch {
                 delay(3_000L)
                 if (_uiState.value.navCancelPendingConfirm) {
@@ -304,13 +319,9 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    /** Para el Asistente IA por voz: habla [text] y solo al terminar ejecuta [onDone]. */
-    fun speakThenRun(text: String, onDone: () -> Unit) {
-        tts.speak(text, onDone)
-    }
-
     fun speakHomePrompt() {
-        tts.speak("¿Desea volver al inicio? Presiona nuevamente para confirmar.")
+        // Sin "inicio": el micrófono sigue escuchando mientras esta frase suena.
+        voice.speak("¿Deseas salir de este modo? Toca dos veces para confirmar.")
     }
 
     fun resetToSearch() {
@@ -318,9 +329,10 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
         _uiState.update {
             RouteUiState(userLocation = it.userLocation, favoriteDestinations = it.favoriteDestinations)
         }
+        vibrate()
         viewModelScope.launch {
             delay(200L)
-            tts.speak("Modo Ruta. Indica tu destino.")
+            voice.speak("Indica tu destino.")
         }
     }
 
@@ -342,11 +354,11 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun onLocationRecentered() {
-        tts.speak("Mapa centrado en tu ubicación actual.")
+        voice.speak("Mapa centrado en tu ubicación actual.")
     }
 
     fun onLocationUnavailableYet() {
-        tts.speak("Buscando tu ubicación actual.")
+        voice.speak("Buscando tu ubicación actual.")
     }
 
     // ── Navegación simulada ─────────────────────────────────────────────────
@@ -380,13 +392,13 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
                             navArrived = frame.arrived,
                         )
                     }
-                    tts.speak(frame.instruction)
                     if (hapticEnabled) {
-                        vibratePattern(appContext, if (frame.arrived) VibPattern.ONE else VibPattern.TWO)
+                        vibratePattern(appContext, if (frame.arrived) VibPattern.ONE else VibPattern.TWO, vibrationIntensity)
                     }
+                    voice.speak(frame.instruction)
                     if (frame.arrived) {
                         delay(300L)
-                        tts.speak(navArrivalMessages.next())
+                        voice.speak(navArrivalMessages.next())
                         delay(4_500L)
                         _uiState.update { RouteUiState(userLocation = it.userLocation) }
                     }
@@ -394,15 +406,37 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    // ── Prefs sync ─────────────────────────────────────────────────────────
-
-    fun updateTtsSettings(enabled: Boolean, speed: TtsSpeed) {
-        tts.enabled = enabled
-        tts.setSpeed(speed)
+    /**
+     * Pausa silenciosa al dejar de ser la pantalla activa (navegación a otra
+     * pantalla, sin destruir este ViewModel) — corta la narración de la
+     * navegación simulada en curso, si la hay. Idempotente.
+     */
+    fun pauseSimulatedNavigation() {
+        if (navPaused) return
+        navPaused = true
+        navJob?.cancel()
+        voice.stopSpeaking()
     }
+
+    /**
+     * Reanuda la navegación simulada tras [pauseSimulatedNavigation], solo si
+     * había una en curso y no había llegado ya a destino. No guarda el
+     * progreso exacto: reinicia el trayecto simulado desde el punto de partida.
+     */
+    fun resumeSimulatedNavigationIfNeeded() {
+        navPaused = false
+        if (!_uiState.value.routeStarted || _uiState.value.navArrived) return
+        startSimulatedNavigation()
+    }
+
+    // ── Prefs sync ─────────────────────────────────────────────────────────
 
     fun updateHapticEnabled(enabled: Boolean) {
         hapticEnabled = enabled
+    }
+
+    fun updateVibrationIntensity(intensity: VibrationIntensity) {
+        vibrationIntensity = intensity
     }
 
     /** Cambia el ritmo de la próxima navegación simulada (no afecta una ya en curso). */
@@ -412,64 +446,5 @@ internal class RouteViewModel(application: Application) : AndroidViewModel(appli
 
     override fun onCleared() {
         navJob?.cancel()
-        tts.shutdown()
-    }
-}
-
-// ── TTS helper ─────────────────────────────────────────────────────────────
-
-private class RouteTtsHelper(context: Context) {
-
-    private var engine: TextToSpeech? = null
-    @Volatile private var ready = false
-    private val nextUtteranceId = AtomicInteger(0)
-    private val pendingCallbacks = mutableMapOf<String, () -> Unit>()
-    private val mainHandler = Handler(Looper.getMainLooper())
-
-    var enabled: Boolean = true
-    var speechRate: Float = TtsSpeed.NORMAL.rate
-
-    init {
-        engine = TextToSpeech(context.applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                engine?.language = Locale("es", "PE")
-                ready = true
-            }
-        }
-        engine?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) = Unit
-            override fun onDone(utteranceId: String?) = runPendingCallback(utteranceId)
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) = runPendingCallback(utteranceId)
-            override fun onError(utteranceId: String?, errorCode: Int) = runPendingCallback(utteranceId)
-        })
-    }
-
-    private fun runPendingCallback(utteranceId: String?) {
-        val callback = utteranceId?.let { pendingCallbacks.remove(it) } ?: return
-        mainHandler.post(callback)
-    }
-
-    fun speak(text: String) = speak(text, onDone = null)
-
-    /** [onDone] se dispara cuando el motor termina de reproducir [text] (usado por el Asistente IA para no navegar antes de que termine de hablar). */
-    fun speak(text: String, onDone: (() -> Unit)?) {
-        if (!ready || !enabled) {
-            onDone?.invoke()
-            return
-        }
-        engine?.setSpeechRate(speechRate)
-        val utteranceId = "route-${nextUtteranceId.getAndIncrement()}"
-        if (onDone != null) pendingCallbacks[utteranceId] = onDone
-        engine?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-    }
-
-    fun setSpeed(speed: TtsSpeed) { speechRate = speed.rate }
-
-    fun shutdown() {
-        engine?.stop()
-        engine?.shutdown()
-        engine = null
-        pendingCallbacks.clear()
     }
 }

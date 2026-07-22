@@ -6,27 +6,19 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.pasoseguro.app.data.TtsSpeed
+import com.pasoseguro.app.data.VibrationIntensity
+import com.pasoseguro.app.utils.HapticHelper
+import com.pasoseguro.app.voice.VoiceInteractionManager
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
-import java.util.Locale
 import kotlin.random.Random
 
 // ── Domain models ──────────────────────────────────────────────────────────
@@ -54,7 +46,9 @@ internal val ALERT_SEQUENCE = listOf(
         recommendation = "Mantenga el dispositivo hacia adelante",
         severity = AlertSeverity.CLEAR, direction = ObstacleDirection.NONE,
         distanceMeters = null,
-        speakText = "Bienvenido al modo Navegar. La cámara está activa. Comenzando el monitoreo del entorno.",
+        // Sin "Navegar"/"navegación": el micrófono se arma casi al mismo tiempo
+        // que este mensaje suena (ver VoiceCommand.kt).
+        speakText = "Modo activado. La cámara está activa. Comenzando el monitoreo del entorno.",
         vibration = VibPattern.ONE,
     ),
     NavAlert(
@@ -131,7 +125,7 @@ internal data class NavigateUiState(
 
 // ── Vibration helper ───────────────────────────────────────────────────────
 
-internal fun vibratePattern(context: Context, pattern: VibPattern) {
+internal fun vibratePattern(context: Context, pattern: VibPattern, intensity: VibrationIntensity = VibrationIntensity.MEDIA) {
     if (pattern == VibPattern.NONE) return
     val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
@@ -139,115 +133,27 @@ internal fun vibratePattern(context: Context, pattern: VibPattern) {
         @Suppress("DEPRECATION")
         context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     }
+    // El número de pulsos codifica el tipo/severidad de la alerta y no cambia
+    // con la preferencia del usuario; [intensity] solo escala la amplitud.
+    val amp = intensity.amplitude
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val effect = when (pattern) {
-            VibPattern.ONE   -> VibrationEffect.createOneShot(60, VibrationEffect.DEFAULT_AMPLITUDE)
-            VibPattern.TWO   -> VibrationEffect.createWaveform(longArrayOf(0, 60, 110, 60), -1)
-            VibPattern.THREE -> VibrationEffect.createWaveform(longArrayOf(0, 60, 80, 60, 80, 80), -1)
+            VibPattern.ONE   -> VibrationEffect.createOneShot(100, amp)
+            VibPattern.TWO   -> VibrationEffect.createWaveform(longArrayOf(0, 90, 100, 90), intArrayOf(0, amp, 0, amp), -1)
+            VibPattern.THREE -> VibrationEffect.createWaveform(
+                longArrayOf(0, 90, 80, 90, 80, 110), intArrayOf(0, amp, 0, amp, 0, amp), -1,
+            )
             VibPattern.NONE  -> return
         }
         vibrator.vibrate(effect)
     } else {
         @Suppress("DEPRECATION")
         when (pattern) {
-            VibPattern.ONE   -> vibrator.vibrate(60)
-            VibPattern.TWO   -> vibrator.vibrate(longArrayOf(0, 60, 110, 60), -1)
-            VibPattern.THREE -> vibrator.vibrate(longArrayOf(0, 60, 80, 60, 80, 80), -1)
+            VibPattern.ONE   -> vibrator.vibrate(100)
+            VibPattern.TWO   -> vibrator.vibrate(longArrayOf(0, 90, 100, 90), -1)
+            VibPattern.THREE -> vibrator.vibrate(longArrayOf(0, 90, 80, 90, 80, 110), -1)
             VibPattern.NONE  -> {}
         }
-    }
-}
-
-// ── TTS with UtteranceProgressListener ─────────────────────────────────────
-//
-// Each call to speakAndAwait() blocks (suspends) until onDone fires,
-// guaranteeing that no message is cut off by the next one.
-
-private class NavigateTtsHelper(context: Context) {
-
-    private var tts: TextToSpeech? = null
-    @Volatile private var ready = false
-
-    var enabled: Boolean = true
-    var speechRate: Float = TtsSpeed.NORMAL.rate
-
-    // Receives Unit when the TTS engine finishes the current utterance.
-    // CONFLATED: only one pending signal is kept — protects against stale signals.
-    private val doneChannel = Channel<Unit>(Channel.CONFLATED)
-
-    // Serializa speakAndAwait: ahora dos flujos independientes pueden llamarlo
-    // (el loop de monitoreo y las respuestas del Asistente IA por voz) — sin
-    // este mutex, una llamada concurrente cortaría la otra a mitad de frase
-    // (ambas usan QUEUE_FLUSH) y podría dejar la primera esperando para
-    // siempre la señal de "onDone" de la segunda.
-    private val speechMutex = Mutex()
-
-    init {
-        tts = TextToSpeech(context.applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("es", "PE")
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) = Unit
-
-                    override fun onDone(utteranceId: String?) {
-                        doneChannel.trySend(Unit)
-                    }
-
-                    // Required abstract override (deprecated in API 21+, still mandatory)
-                    @Suppress("DEPRECATION")
-                    override fun onError(utteranceId: String?) {
-                        doneChannel.trySend(Unit) // treat error as completion
-                    }
-
-                    // API 21+ non-abstract override for modern engines
-                    override fun onError(utteranceId: String?, errorCode: Int) {
-                        doneChannel.trySend(Unit)
-                    }
-                })
-                ready = true
-            }
-        }
-    }
-
-    /**
-     * Speaks [text] and suspends until the engine fires onDone (speech is complete).
-     * Falls back to a fixed [fallbackMs] delay when TTS is disabled or not yet ready.
-     * A 30-second safety timeout prevents infinite suspension if the engine hangs.
-     */
-    suspend fun speakAndAwait(text: String, fallbackMs: Long = 3500L) = speechMutex.withLock {
-        if (!enabled || !ready) {
-            delay(fallbackMs)
-            return@withLock
-        }
-        // Drain any stale signal left by a previous utterance
-        doneChannel.tryReceive()
-        tts?.setSpeechRate(speechRate)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_MAIN)
-        withTimeoutOrNull(30_000L) { doneChannel.receive() }
-        Unit
-    }
-
-    /**
-     * Fire-and-forget speak for UI prompts (e.g., exit confirmation question).
-     * Does NOT block — use speakAndAwait for sequenced alerts.
-     */
-    fun speak(text: String) {
-        if (!ready) return
-        tts?.setSpeechRate(speechRate)
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_DIALOG)
-    }
-
-    fun setSpeed(speed: TtsSpeed) { speechRate = speed.rate }
-
-    fun shutdown() {
-        tts?.stop()
-        tts?.shutdown()
-        tts = null
-    }
-
-    companion object {
-        private const val UTTERANCE_MAIN   = "nav-main"
-        private const val UTTERANCE_DIALOG = "nav-dialog"
     }
 }
 
@@ -256,20 +162,21 @@ private class NavigateTtsHelper(context: Context) {
 internal class NavigateViewModel(application: Application) : AndroidViewModel(application) {
 
     private val appContext: Context = application.applicationContext
-    private val ttsHelper = NavigateTtsHelper(appContext)
+
+    // Único motor de voz de toda la app — ya no un TTS propio de esta
+    // pantalla. El mismo singleton sirve tanto a las alertas guionadas de
+    // este loop como a las respuestas del Asistente IA; su `speakAndAwait`
+    // ya serializa ambos productores (ver TextToSpeechManager).
+    private val voice = VoiceInteractionManager.getInstance(appContext)
 
     private val _uiState = MutableStateFlow(NavigateUiState())
     val uiState: StateFlow<NavigateUiState> = _uiState.asStateFlow()
 
-    // Emite cada vez que el Asistente IA termina de hablar una indicación —
-    // NavigateScreen lo usa para abrir una breve ventana de escucha por voz
-    // (sin botón) sin acoplar el reconocimiento a esta ViewModel.
-    private val _speechFinished = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val speechFinished: SharedFlow<Unit> = _speechFinished.asSharedFlow()
-
     private var monitoringJob: Job? = null
     private var alertIndex = 0
     private var hapticEnabled = true
+    private var vibrationIntensity = VibrationIntensity.MEDIA
+    private var monitoringPaused = false
 
     init {
         // Give the TTS engine ~300 ms to initialize before the first alert.
@@ -285,8 +192,8 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
     //
     // Timing contract per alert:
     //   1. Update UI (bounding box + card change instantly)
-    //   2. speakAndAwait → suspends until TTS finishes the FULL message
-    //   3. Vibrate (synchronized, plays after speech ends)
+    //   2. Vibrate immediately — the user perceives the haptic alert first
+    //   3. speakAndAwait → suspends until TTS finishes the FULL message
     //   4. Silence gap: 3–4 s of breathing room
     //   5. Advance index → repeat
 
@@ -299,17 +206,20 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
                 val alert = ALERT_SEQUENCE[alertIndex]
                 _uiState.update { it.copy(alert = alert) }
 
+                if (hapticEnabled) vibratePattern(appContext, alert.vibration, vibrationIntensity)
+
                 val fallback = when (alert.severity) {
                     AlertSeverity.DANGER  -> 4000L
                     AlertSeverity.CAUTION -> 4000L
                     AlertSeverity.CLEAR   -> 3500L
                 }
-                ttsHelper.speakAndAwait(alert.speakText, fallback)
-                _speechFinished.tryEmit(Unit)
+                // flush=false: en la primera vuelta (bienvenida) evita cortar la
+                // confirmación de navegación que puede seguir sonando al entrar;
+                // en las vueltas siguientes no cambia nada, porque cada alerta ya
+                // se espera (speakAndAwait) antes de que empiece la próxima.
+                voice.speakAndAwait(alert.speakText, fallback, flush = false)
 
                 if (!isActive) break
-
-                if (hapticEnabled) vibratePattern(appContext, alert.vibration)
 
                 // Silence gap — gives the user time to process before the next alert
                 delay(Random.nextLong(3000L, 4001L))
@@ -330,30 +240,37 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
         monitoringJob?.cancel()
         monitoringJob = null
         _uiState.update { it.copy(isMonitoring = false) }
-        ttsHelper.speak("¿Desea volver al inicio? Presione dos veces para confirmar.")
+        if (hapticEnabled) HapticHelper.vibrate(appContext, true, vibrationIntensity)
+        // Sin "inicio": el micrófono sigue escuchando mientras esta frase suena
+        // y "inicio" es palabra gatillo del comando global Inicio.
+        voice.speak("¿Deseas salir de este modo? Presiona dos veces para confirmar.")
     }
 
     /**
      * Resumes the monitoring loop from the last alert index.
-     * Safe to call even when already monitoring (no-op in that case).
+     * Safe to call even when already monitoring (no-op in that case) — usada
+     * también por el comando de voz "Iniciar navegación"/"Reanudar navegación".
      */
     fun resumeMonitoring() {
+        monitoringPaused = false
         if (_uiState.value.isMonitoring) return
         startMonitoringLoop()
     }
 
-    /** Para el Asistente IA por voz: habla [text] y solo al terminar ejecuta [onDone]. */
-    fun speakThenRun(text: String, onDone: () -> Unit) {
-        viewModelScope.launch {
-            ttsHelper.speakAndAwait(text)
-            onDone()
-        }
-    }
-
-    /** Sync TTS prefs from ConfigScreen when they change. */
-    fun updateTtsSettings(enabled: Boolean, speed: TtsSpeed) {
-        ttsHelper.enabled = enabled
-        ttsHelper.setSpeed(speed)
+    /**
+     * Pausa silenciosa al dejar de ser la pantalla activa (navegación a otra
+     * pantalla, sin destruir este ViewModel) — a diferencia de
+     * [stopMonitoringForConfirm], no habla ningún mensaje. Idempotente:
+     * llamarla dos veces seguidas sin un [resumeMonitoring] de por medio no
+     * vuelve a cancelar el job ni a cortar el TTS.
+     */
+    fun pauseMonitoring() {
+        if (monitoringPaused) return
+        monitoringPaused = true
+        monitoringJob?.cancel()
+        monitoringJob = null
+        voice.stopSpeaking()
+        _uiState.update { it.copy(isMonitoring = false) }
     }
 
     /** Sync haptic pref from ConfigScreen when it changes. */
@@ -361,8 +278,12 @@ internal class NavigateViewModel(application: Application) : AndroidViewModel(ap
         hapticEnabled = enabled
     }
 
+    /** Sync vibration intensity pref from ConfigScreen when it changes. */
+    fun updateVibrationIntensity(intensity: VibrationIntensity) {
+        vibrationIntensity = intensity
+    }
+
     override fun onCleared() {
         monitoringJob?.cancel()
-        ttsHelper.shutdown()
     }
 }

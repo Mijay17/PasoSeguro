@@ -38,8 +38,10 @@ import com.pasoseguro.app.ui.LocalUserPreferences
 import com.pasoseguro.app.ui.theme.ContactGreen
 import com.pasoseguro.app.ui.theme.ContactGreen50
 import com.pasoseguro.app.utils.HapticHelper
-import com.pasoseguro.app.utils.TtsHelper
-import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
+import com.pasoseguro.app.voice.ScreenVoiceCommand
+import com.pasoseguro.app.voice.ScreenVoiceContext
+import com.pasoseguro.app.voice.VoiceInteractionState
+import com.pasoseguro.app.voice.rememberAutoListenVoice
 import kotlinx.coroutines.launch
 
 // ── Sample data ─────────────────────────────────────────────────────────────
@@ -64,27 +66,45 @@ private enum class ContactViewMode { LIST, CAROUSEL }
 
 // ── Screen ──────────────────────────────────────────────────────────────────
 
+private const val ADD_CONTACT_STUB = "Agregar nuevo contacto. Esta función estará disponible próximamente."
+private const val CALL_CONTACT_STUB =
+    "Función de llamada por voz disponible próximamente. Toca el ícono de llamada junto a un contacto."
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContactsScreen(navController: NavController) {
     val context = LocalContext.current
     val prefs   = LocalUserPreferences.current
-    val tts     = remember { TtsHelper(context) }
     val feature = Feature.CONTACTS
 
-    DisposableEffect(Unit) {
-        tts.enabled = prefs.ttsEnabled
-        tts.setSpeed(prefs.ttsSpeed)
-        tts.speak("Bienvenido a Contactos. Aquí puedes administrar tus contactos de confianza.")
-        onDispose { tts.shutdown() }
+    val contactsVoiceContext = remember {
+        ScreenVoiceContext(
+            screenName = "Contactos",
+            commands = listOf(
+                ScreenVoiceCommand(
+                    keywords           = listOf("agregar contacto", "anadir contacto", "nuevo contacto"),
+                    onRecognized       = {},
+                    confirmationSpeech = ADD_CONTACT_STUB,
+                ),
+                ScreenVoiceCommand(
+                    keywords           = listOf("llamar contacto", "llamar", "hacer una llamada"),
+                    onRecognized       = {},
+                    confirmationSpeech = CALL_CONTACT_STUB,
+                ),
+            ),
+            helpHint = "En esta pantalla puedes decir: Agregar contacto, o Llamar contacto.",
+        )
     }
+    val voice = rememberAutoListenVoice(contactsVoiceContext)
+    val voiceState by voice.state.collectAsState()
 
-    val assistantConfirm = rememberVoiceAssistantTrigger(
-        navController = navController,
-        onSpeak       = tts::speak,
-        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
-        speakThenRun  = tts::speak,
-    )
+    LaunchedEffect(Unit) {
+        // Sin "Contactos": el micrófono se arma casi al mismo tiempo que este
+        // mensaje suena (ver VoiceCommand.kt).
+        // flush=false: no cortar la confirmación de navegación ("Abriendo
+        // Contactos"/"Aquí tienes...") que puede seguir sonando al entrar.
+        voice.speak("Aquí puedes administrar a las personas de confianza.", flush = false)
+    }
 
     var viewMode by remember { mutableStateOf(ContactViewMode.LIST) }
     var favoritesOnly by remember { mutableStateOf(false) }
@@ -105,7 +125,13 @@ fun ContactsScreen(navController: NavController) {
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    IconButton(
+                        onClick = {
+                            HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
+                            voice.speak("Volviendo a la pantalla principal")
+                            navController.popBackStack()
+                        },
+                    ) {
                         Icon(
                             imageVector        = Icons.Filled.ArrowBackIosNew,
                             contentDescription = "Volver al inicio",
@@ -115,8 +141,8 @@ fun ContactsScreen(navController: NavController) {
                 },
                 actions = {
                     AssistantMicButton(
-                        pending = assistantConfirm.isPending,
-                        onClick = assistantConfirm::onTap,
+                        pending = voiceState != VoiceInteractionState.Idle,
+                        onClick = voice::requestHelp,
                         tint    = feature.tint,
                     )
                 },
@@ -130,29 +156,29 @@ fun ContactsScreen(navController: NavController) {
                 left = BarAction(
                     icon           = Icons.Filled.PersonAdd,
                     label          = "Añadir",
-                    pendingMessage = "Has seleccionado Añadir contacto. Presiona nuevamente para confirmar.",
+                    pendingMessage = "Has seleccionado Añadir contacto. Presiona dos veces para confirmar.",
                     onConfirm      = {
-                        tts.speak("Agregar nuevo contacto. Esta función estará disponible próximamente.")
+                        voice.speak(ADD_CONTACT_STUB)
                     },
                 ),
                 center = if (viewMode == ContactViewMode.LIST) {
                     BarAction(
                         icon           = Icons.Filled.ViewCarousel,
                         label          = "Carrusel",
-                        pendingMessage = "Has seleccionado Modo Carrusel. Presiona nuevamente para confirmar.",
+                        pendingMessage = "Has seleccionado Modo Carrusel. Presiona dos veces para confirmar.",
                         onConfirm      = {
                             viewMode = ContactViewMode.CAROUSEL
-                            tts.speak("Modo Carrusel seleccionado.")
+                            voice.speak("Modo Carrusel seleccionado.")
                         },
                     )
                 } else {
                     BarAction(
                         icon           = Icons.Filled.ViewList,
                         label          = "Lista",
-                        pendingMessage = "Has seleccionado Modo Lista. Presiona nuevamente para confirmar.",
+                        pendingMessage = "Has seleccionado Modo Lista. Presiona dos veces para confirmar.",
                         onConfirm      = {
                             viewMode = ContactViewMode.LIST
-                            tts.speak("Modo Lista seleccionado.")
+                            voice.speak("Modo Lista seleccionado.")
                         },
                     )
                 },
@@ -160,18 +186,19 @@ fun ContactsScreen(navController: NavController) {
                     icon           = Icons.Filled.Star,
                     label          = "Favoritos",
                     selected       = favoritesOnly,
-                    pendingMessage = "Has seleccionado Favoritos. Presiona nuevamente para confirmar.",
+                    pendingMessage = "Has seleccionado Favoritos. Presiona dos veces para confirmar.",
                     onConfirm      = {
                         favoritesOnly = !favoritesOnly
-                        tts.speak(
+                        voice.speak(
                             if (favoritesOnly) "Mostrando solo contactos favoritos."
                             else "Mostrando todos los contactos."
                         )
                     },
                 ),
                 accentColor   = feature.tint,
-                tts           = tts,
+                onSpeak       = voice::speak,
                 hapticEnabled = prefs.hapticEnabled,
+                vibrationIntensity = prefs.vibrationIntensity,
                 modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
         },
@@ -182,14 +209,14 @@ fun ContactsScreen(navController: NavController) {
                 contacts = visibleContacts,
                 padding  = padding,
                 onTap    = { contact ->
-                    HapticHelper.vibrate(context, prefs.hapticEnabled)
-                    tts.speak("${contact.name}. ${contact.relation}. Teléfono ${contact.phone}.")
+                    HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
+                    voice.speak("${contact.name}. ${contact.relation}. Teléfono ${contact.phone}.")
                 },
             )
             ContactViewMode.CAROUSEL -> ContactsCarouselView(
                 contacts = visibleContacts,
                 padding  = padding,
-                tts      = tts,
+                onSpeak  = voice::speak,
             )
         }
     }
@@ -259,7 +286,7 @@ private fun EmptyFavoritesState() {
 private fun ContactsCarouselView(
     contacts: List<Contact>,
     padding: PaddingValues,
-    tts: TtsHelper,
+    onSpeak: (String) -> Unit,
 ) {
     if (contacts.isEmpty()) {
         Box(
@@ -277,7 +304,7 @@ private fun ContactsCarouselView(
 
     LaunchedEffect(pagerState.currentPage, contacts.size) {
         val contact = contacts.getOrNull(pagerState.currentPage) ?: return@LaunchedEffect
-        tts.speak(contact.name)
+        onSpeak(contact.name)
     }
 
     Column(

@@ -60,7 +60,7 @@ fun CarouselWelcomePage(
         )
         Box(
             modifier = Modifier
-                .size(110.dp)
+                .size(185.dp)
                 .scale(logoScale)
                 .clip(CircleShape)
                 .background(
@@ -71,7 +71,7 @@ fun CarouselWelcomePage(
                 .semantics {
                     contentDescription =
                         if (assistantPending)
-                            "Confirmar: Asistente IA. Presiona nuevamente para comenzar a hablar."
+                            "Confirmar: Asistente IA. Toca dos veces para comenzar a hablar."
                         else
                             "Logotipo de PasoSeguro. Doble toque para activar el Asistente IA por voz."
                 },
@@ -81,7 +81,7 @@ fun CarouselWelcomePage(
                 painter            = painterResource(id = R.drawable.ic_logo),
                 contentDescription = null,
                 contentScale       = ContentScale.Fit,
-                modifier           = Modifier.size(96.dp),
+                modifier           = Modifier.size(165.dp),
             )
         }
 

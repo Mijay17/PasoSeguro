@@ -17,6 +17,7 @@ import com.pasoseguro.app.components.PerimeterButton
 import com.pasoseguro.app.data.InteractionMode
 import com.pasoseguro.app.navigation.Feature
 import com.pasoseguro.app.ui.LocalUserPreferences
+import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.utils.*
 import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
 import kotlinx.coroutines.delay
@@ -38,39 +39,7 @@ private val welcomeMessages = NonRepeatingPicker(
 fun HomeScreen(navController: NavController) {
     val context = LocalContext.current
     val prefs   = LocalUserPreferences.current
-    val tts     = remember { TtsHelper(context) }
-
-    // Sync TTS settings whenever preferences change
-    LaunchedEffect(prefs.ttsEnabled, prefs.ttsSpeed) {
-        tts.enabled = prefs.ttsEnabled
-        tts.setSpeed(prefs.ttsSpeed)
-    }
-
-    DisposableEffect(Unit) { onDispose { tts.shutdown() } }
-
-    // Bienvenida — se dispara una sola vez al entrar a Home (LaunchedEffect
-    // con clave Unit no se repite en recomposiciones; si el usuario vuelve a
-    // entrar a esta pantalla, Compose crea una nueva instancia y sí vuelve a
-    // sonar, con un mensaje distinto al último).
-    LaunchedEffect(Unit) {
-        delay(700L)
-        tts.speak(welcomeMessages.next())
-    }
-
-    val tapHandler = rememberDoubleTapHandler(tts = tts, prefs = prefs) { feature ->
-        navController.navigate(feature.route)
-    }
-
-    // ── Asistente IA por voz ────────────────────────────────────────────────
-    // Toda la lógica (permiso de mic, doble toque, reconocimiento y
-    // resolución de comandos globales) vive en voice/VoiceAssistantTrigger —
-    // reutilizada tal cual por el resto de las pantallas principales.
-    val assistantConfirm = rememberVoiceAssistantTrigger(
-        navController = navController,
-        onSpeak       = tts::speak,
-        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
-        speakThenRun  = tts::speak,
-    )
+    val voice   = LocalVoiceInteractionManager.current
 
     val features    = Feature.entries
     val topFeatures = listOf(Feature.CONTACTS, Feature.ALERTS, Feature.CONFIG)
@@ -84,13 +53,39 @@ fun HomeScreen(navController: NavController) {
     val startPage       = actualPageCount * 500      // 3 500  (middle of 7 000)
     val pagerState = rememberPagerState(initialPage = startPage, pageCount = { actualPageCount * 1_000 })
 
+    // Bienvenida + reset del carrusel — se dispara cada vez que se (re)entra a
+    // Home (LaunchedEffect con clave Unit se reinicia porque Compose Navigation
+    // descompone esta pantalla al salir y la recompone al volver — "Atrás",
+    // "Regresar", "Volver" e "Inicio" deben terminar siempre en el Home base).
+    // pagerState es la única excepción: por dentro usa rememberSaveable, así
+    // que sobrevive ese ciclo y recuerda la última tarjeta vista — por eso hay
+    // que reponerlo explícitamente al slide inicial aquí en cada (re)entrada.
+    LaunchedEffect(Unit) {
+        pagerState.scrollToPage(startPage)
+        delay(700L)
+        // flush=false: si venimos de "Atrás"/"Inicio" desde otra pantalla, esa
+        // confirmación ("Volviendo a la pantalla...") todavía puede estar
+        // sonando — no queremos cortarla, sino que esta bienvenida se
+        // encole detrás y se escuche completa la secuencia.
+        voice.speak(welcomeMessages.next(), flush = false)
+    }
+
+    val tapHandler = rememberDoubleTapHandler(onSpeak = voice::speak, prefs = prefs, onStop = voice::stopSpeaking) { feature ->
+        navController.navigate(feature.route)
+    }
+
+    // ── Asistente IA por voz ────────────────────────────────────────────────
+    // Home es la única pantalla que conserva el patrón de doble toque; el
+    // resto usa escucha automática y continua (ver voice/AutoListenScreen.kt).
+    val assistantConfirm = rememberVoiceAssistantTrigger()
+
     // Build a LongPressConfig for a given feature (null = use double-tap mode)
     fun longPressConfigFor(feature: Feature): LongPressConfig? {
         if (prefs.interactionMode != InteractionMode.LONG_PRESS) return null
         return LongPressConfig(
-            onMidpoint = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+            onMidpoint = { HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity) },
             onComplete = {
-                tts.speak("Abriendo ${feature.ttsText}")
+                voice.speak("Abriendo ${feature.ttsText}")
                 navController.navigate(feature.route)
             },
         )
@@ -124,8 +119,8 @@ fun HomeScreen(navController: NavController) {
                 pagerState         = pagerState,
                 onFeatureTap       = tapHandler::onTap,
                 longPressConfigFor = ::longPressConfigFor,
-                onSpeak            = tts::speak,
-                onHaptic           = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
+                onSpeak            = voice::speak,
+                onHaptic           = { HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity) },
                 assistantPending   = assistantConfirm.isPending,
                 onAssistantTap     = assistantConfirm::onTap,
                 modifier           = Modifier.fillMaxSize(),

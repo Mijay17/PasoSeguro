@@ -31,17 +31,21 @@ import androidx.navigation.NavController
 import com.pasoseguro.app.components.AssistantMicButton
 import com.pasoseguro.app.components.BarAction
 import com.pasoseguro.app.components.ProceduralBottomBar
+import com.pasoseguro.app.navigation.Feature
 import com.pasoseguro.app.ui.LocalUserPreferences
+import com.pasoseguro.app.ui.LocalVoiceInteractionManager
 import com.pasoseguro.app.ui.theme.*
-import com.pasoseguro.app.utils.ConfirmActionState
-import com.pasoseguro.app.utils.ConfirmProgressBar
 import com.pasoseguro.app.utils.HapticHelper
-import com.pasoseguro.app.utils.TtsHelper
-import com.pasoseguro.app.utils.rememberConfirmAction
-import com.pasoseguro.app.voice.rememberVoiceAssistantTrigger
+import com.pasoseguro.app.voice.ScreenVoiceCommand
+import com.pasoseguro.app.voice.ScreenVoiceContext
+import com.pasoseguro.app.voice.VoiceInteractionState
+import com.pasoseguro.app.voice.rememberAutoListenVoice
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
+
+private const val READ_NOTIFICATIONS_COUNT = 5
 
 // ── Screen ─────────────────────────────────────────────────────────────────
 
@@ -52,80 +56,114 @@ fun AlertsScreen(navController: NavController) {
 
     val context = LocalContext.current
     val prefs   = LocalUserPreferences.current
-    val tts     = remember { TtsHelper(context) }
-    DisposableEffect(Unit) { onDispose { tts.shutdown() } }
-    LaunchedEffect(prefs.ttsEnabled, prefs.ttsSpeed) {
-        tts.enabled = prefs.ttsEnabled
-        tts.setSpeed(prefs.ttsSpeed)
+    val voice   = LocalVoiceInteractionManager.current
+    val scope   = rememberCoroutineScope()
+
+    val alertsVoiceContext = remember(uiState.filteredEvents) {
+        ScreenVoiceContext(
+            screenName = "Notificaciones",
+            commands = listOf(
+                ScreenVoiceCommand(
+                    keywords = listOf("leer notificaciones", "leer alertas", "leer eventos"),
+                    onRecognized = {
+                        scope.launch {
+                            val events = uiState.filteredEvents.take(READ_NOTIFICATIONS_COUNT)
+                            if (events.isEmpty()) {
+                                voice.speakAndAwait("No hay notificaciones registradas.")
+                            } else {
+                                events.forEach { event -> voice.speakAndAwait("${event.title}. ${event.description}") }
+                            }
+                        }
+                    },
+                    confirmationSpeech = "Leyendo notificaciones.",
+                ),
+                ScreenVoiceCommand(
+                    // Sin la palabra "repetir": ese matiz ya lo cubre el comando global Repetir;
+                    // esta frase busca específicamente la última alerta registrada, no la última locución.
+                    keywords = listOf("ultima alerta", "leer ultima alerta", "que paso"),
+                    onRecognized = {
+                        val last = uiState.filteredEvents.firstOrNull()
+                        voice.speak(last?.let { "${it.title}. ${it.description}" } ?: "No hay alertas registradas todavía.")
+                    },
+                ),
+            ),
+            helpHint = "En esta pantalla puedes decir: Leer notificaciones, o Última alerta.",
+            // Mientras se explica esta pantalla (historial de Navegar + Explorar), esas
+            // dos palabras no deben disparar un cambio de pantalla accidental. El resto
+            // de comandos globales (Inicio/Atrás/Ayuda/Cancelar/Repetir) sigue igual.
+            disabledFeatures = setOf(Feature.NAVIGATE, Feature.SCAN),
+        )
     }
+    val activeVoice = rememberAutoListenVoice(alertsVoiceContext)
+    val voiceState by activeVoice.state.collectAsState()
+
     LaunchedEffect(Unit) {
-        tts.speak("Bienvenido al Historial de actividad. Aquí encontrarás las alertas registradas durante el uso de PasoSeguro.")
+        // Sin "alertas": el micrófono se arma casi al mismo tiempo que este
+        // mensaje suena (ver VoiceCommand.kt).
+        // flush=false: no cortar la confirmación de navegación que puede seguir sonando al entrar.
+        voice.speak(
+            "Bienvenido al historial de actividad. Aquí encontrarás lo registrado durante el uso de PasoSeguro.",
+            flush = false,
+        )
     }
-
-    val backConfirm = rememberConfirmAction(
-        pendingMessage = "Has seleccionado regresar. Presiona nuevamente para confirmar.",
-        onSpeak        = tts::speak,
-        onHaptic       = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
-        onConfirm      = { navController.popBackStack() },
-    )
-
-    val assistantConfirm = rememberVoiceAssistantTrigger(
-        navController = navController,
-        onSpeak       = tts::speak,
-        onHaptic      = { HapticHelper.vibrate(context, prefs.hapticEnabled) },
-        speakThenRun  = tts::speak,
-    )
 
     Scaffold(
         topBar = {
             AlertsTopBar(
-                eventCount       = uiState.filteredEvents.size,
-                backConfirm      = backConfirm,
-                assistantConfirm = assistantConfirm,
+                eventCount    = uiState.filteredEvents.size,
+                recentOnly    = uiState.recentOnly,
+                voiceState    = voiceState,
+                onMicClick    = voice::requestHelp,
+                onBackClick   = {
+                    HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
+                    voice.speak("Volviendo a la pantalla principal")
+                    navController.popBackStack()
+                },
+                onRecentClick = {
+                    HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
+                    val activating = !uiState.recentOnly
+                    vm.toggleRecentOnly()
+                    voice.speak(if (activating) "Mostrando eventos recientes." else "Mostrando todos los eventos.")
+                },
             )
         },
         bottomBar = {
-            val currentMode = uiState.selectedFilter
-            val toggleTarget = if (currentMode == EventMode.EXPLORE) EventMode.NAVIGATE else EventMode.EXPLORE
-            val toggleLabel  = if (toggleTarget == EventMode.NAVIGATE) "Navegar" else "Explorar"
-            val toggleIcon   = if (toggleTarget == EventMode.NAVIGATE) Icons.Filled.NearMe else Icons.Filled.Explore
-
+            // Filtros exclusivamente en la parte inferior: Todos / Navegar / Explorar.
             ProceduralBottomBar(
                 left = BarAction(
                     icon           = Icons.Filled.List,
                     label          = "Todos",
                     selected       = uiState.selectedFilter == null,
-                    pendingMessage = "Has seleccionado Todos. Presiona nuevamente para confirmar.",
+                    pendingMessage = "Mostrar todos los eventos. Toca dos veces para confirmar.",
                     onConfirm      = {
                         vm.setFilter(null)
-                        tts.speak("Mostrando todos los registros.")
+                        voice.speak("Mostrando todos los registros.")
                     },
                 ),
                 center = BarAction(
-                    icon           = toggleIcon,
-                    label          = toggleLabel,
-                    pendingMessage = "Has seleccionado $toggleLabel. Presiona nuevamente para confirmar.",
+                    icon           = Icons.Filled.NearMe,
+                    label          = "Navegar",
+                    selected       = uiState.selectedFilter == EventMode.NAVIGATE,
+                    pendingMessage = "Filtrar por Navegar. Toca dos veces para confirmar.",
                     onConfirm      = {
-                        vm.setFilter(toggleTarget)
-                        tts.speak("Modo $toggleLabel seleccionado.")
+                        vm.setFilter(EventMode.NAVIGATE)
+                        voice.speak("Mostrando eventos de Navegar.")
                     },
                 ),
                 right = BarAction(
-                    icon           = Icons.Filled.Schedule,
-                    label          = "Recientes",
-                    selected       = uiState.recentOnly,
-                    pendingMessage = "Has seleccionado Recientes. Presiona nuevamente para confirmar.",
+                    icon           = Icons.Filled.Explore,
+                    label          = "Explorar",
+                    selected       = uiState.selectedFilter == EventMode.EXPLORE,
+                    pendingMessage = "Filtrar por Explorar. Toca dos veces para confirmar.",
                     onConfirm      = {
-                        val activating = !uiState.recentOnly
-                        vm.toggleRecentOnly()
-                        tts.speak(
-                            if (activating) "Mostrando eventos recientes." else "Mostrando todos los eventos."
-                        )
+                        vm.setFilter(EventMode.EXPLORE)
+                        voice.speak("Mostrando eventos de Explorar.")
                     },
                 ),
                 accentColor   = AlertRed,
-                tts           = tts,
+                onSpeak       = voice::speak,
                 hapticEnabled = prefs.hapticEnabled,
+                vibrationIntensity = prefs.vibrationIntensity,
                 modifier      = Modifier.fillMaxWidth().navigationBarsPadding(),
             )
         },
@@ -161,7 +199,15 @@ fun AlertsScreen(navController: NavController) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(uiState.filteredEvents, key = { it.id }) { event ->
-                        EventCard(event = event)
+                        EventCard(
+                            event = event,
+                            onTap = {
+                                // Accesibilidad: al seleccionar un evento de la lista, describir
+                                // su contenido de inmediato por voz.
+                                HapticHelper.vibrate(context, prefs.hapticEnabled, prefs.vibrationIntensity)
+                                voice.speak("${event.title}. ${event.description}")
+                            },
+                        )
                     }
                     item { Spacer(Modifier.height(8.dp)) }
                 }
@@ -175,66 +221,68 @@ fun AlertsScreen(navController: NavController) {
 @Composable
 private fun AlertsTopBar(
     eventCount: Int,
-    backConfirm: ConfirmActionState,
-    assistantConfirm: ConfirmActionState,
+    recentOnly: Boolean,
+    voiceState: VoiceInteractionState,
+    onMicClick: () -> Unit,
+    onBackClick: () -> Unit,
+    onRecentClick: () -> Unit,
 ) {
-    // Wrap in Column so the countdown strip appears flush below the app bar,
-    // inside the topBar slot — Scaffold accounts for the full height automatically.
-    Column {
-        TopAppBar(
-            title = {
-                Column {
-                    Text(
-                        text  = "Notificaciones",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    )
-                    if (eventCount > 0) {
-                        Text(
-                            text  = "$eventCount ${if (eventCount == 1) "evento" else "eventos"}",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        )
-                    }
-                }
-            },
-            actions = {
-                AssistantMicButton(
-                    pending = assistantConfirm.isPending,
-                    onClick = assistantConfirm::onTap,
-                    tint    = MaterialTheme.colorScheme.onSurface,
+    TopAppBar(
+        title = {
+            Column {
+                Text(
+                    text  = "Notificaciones",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 )
-                IconButton(
-                    onClick  = backConfirm::onTap,
-                    modifier = Modifier.semantics {
-                        contentDescription = if (backConfirm.isPending)
-                            "Confirmación pendiente. Presiona de nuevo para regresar."
-                        else
-                            "Cerrar y volver al inicio"
-                    },
-                ) {
-                    Icon(
-                        imageVector        = Icons.Filled.Close,
-                        contentDescription = null,
-                        tint               = if (backConfirm.isPending) AlertRed
-                                             else MaterialTheme.colorScheme.onSurface,
+                if (eventCount > 0) {
+                    Text(
+                        text  = "$eventCount ${if (eventCount == 1) "evento" else "eventos"}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                     )
                 }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor             = MaterialTheme.colorScheme.surface,
-                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                titleContentColor          = MaterialTheme.colorScheme.onSurface,
-            ),
-        )
-        if (backConfirm.isPending) {
-            ConfirmProgressBar(
-                timeoutMs = backConfirm.timeoutMs,
-                color     = AlertRed,
-                modifier  = Modifier.fillMaxWidth().height(2.dp),
+            }
+        },
+        // Flecha de regreso — idéntica a la de Configuración: toque único e
+        // inmediato, sin doble confirmación.
+        navigationIcon = {
+            IconButton(onClick = onBackClick) {
+                Icon(
+                    imageVector        = Icons.Filled.ArrowBackIosNew,
+                    contentDescription = "Volver al inicio",
+                    tint               = MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
+        actions = {
+            AssistantMicButton(
+                pending = voiceState != VoiceInteractionState.Idle,
+                onClick = onMicClick,
+                tint    = MaterialTheme.colorScheme.onSurface,
             )
-        }
-    }
+            IconButton(
+                onClick  = onRecentClick,
+                modifier = Modifier.semantics {
+                    contentDescription = if (recentOnly)
+                        "Mostrando solo eventos recientes. Toca para ver todos."
+                    else
+                        "Mostrar solo eventos recientes."
+                },
+            ) {
+                Icon(
+                    imageVector        = Icons.Filled.Schedule,
+                    contentDescription = null,
+                    tint               = if (recentOnly) AlertRed else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor             = MaterialTheme.colorScheme.surface,
+            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+            titleContentColor          = MaterialTheme.colorScheme.onSurface,
+        ),
+    )
 }
 
 // ── Search field ─────────────────────────────────────────────────────────────
@@ -277,7 +325,7 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, modifier: Modi
 // ── Event card ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun EventCard(event: AppEvent) {
+private fun EventCard(event: AppEvent, onTap: () -> Unit) {
     val modeColor     = if (event.mode == EventMode.NAVIGATE) NavBlue else ScanTeal
     val severityColor = when (event.severity) {
         EventSeverity.DANGER  -> AlertRed
@@ -288,6 +336,7 @@ private fun EventCard(event: AppEvent) {
     val relativeTime = remember(event.timestamp) { formatRelativeTime(event.timestamp) }
 
     Card(
+        onClick   = onTap,
         modifier  = Modifier
             .fillMaxWidth()
             .semantics {

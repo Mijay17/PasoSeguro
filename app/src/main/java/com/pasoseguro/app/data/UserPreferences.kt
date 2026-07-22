@@ -11,17 +11,18 @@ enum class TtsSpeed(val rate: Float) {
     FAST(1.5f),
 }
 
-enum class ConfirmationPrompt {
-    PRESS_AGAIN,      // "Presione nuevamente para continuar."
-    HOLD_TWO_SECONDS, // "Mantenga presionado durante dos segundos para abrir esta opción."
+enum class VibrationIntensity(val amplitude: Int) {
+    SUAVE(90),
+    MEDIA(170),
+    INTENSA(255),
 }
 
 data class UserPreferences(
     val interactionMode: InteractionMode = InteractionMode.DOUBLE_TAP,
     val ttsEnabled: Boolean = true,
     val ttsSpeed: TtsSpeed = TtsSpeed.NORMAL,
-    val confirmationPrompt: ConfirmationPrompt = ConfirmationPrompt.PRESS_AGAIN,
     val hapticEnabled: Boolean = true,
+    val vibrationIntensity: VibrationIntensity = VibrationIntensity.MEDIA,
     val highContrast: Boolean = false,
     val largeFont: Boolean = false,
 ) {
